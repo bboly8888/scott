@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>우리 가계부</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{
+  --bg:#F5F1E6;
+  --surface:#FCFAF4;
+  --surface-2:#EFE9D9;
+  --ink:#242017;
+  --ink-soft:#6B6555;
+  --line:#DCD3BC;
+  --primary:#1F3D38;
+  --primary-soft:#2E5750;
+  --accent:#B9862E;
+  --accent-soft:#E9D6AC;
+  --expense:#8B3A3A;
+  --expense-soft:#F3DDD8;
+  --income:#3E6B4F;
+  --income-soft:#DCEBDF;
+  --radius-sm:4px;
+  --radius-md:8px;
+  --font-head:'Noto Serif KR', serif;
+  --font-body:'IBM Plex Sans KR', -apple-system, sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#181712;
+    --surface:#211F19;
+    --surface-2:#2A2820;
+    --ink:#EDE8DA;
+    --ink-soft:#A79E88;
+    --line:#3B3728;
+    --primary:#8FB8AE;
+    --primary-soft:#6E9A90;
+    --accent:#D8AF63;
+    --accent-soft:#3B331E;
+    --expense:#E0938A;
+    --expense-soft:#3A2523;
+    --income:#8FC29E;
+    --income-soft:#213325;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#181712; --surface:#211F19; --surface-2:#2A2820; --ink:#EDE8DA; --ink-soft:#A79E88;
+  --line:#3B3728; --primary:#8FB8AE; --primary-soft:#6E9A90; --accent:#D8AF63; --accent-soft:#3B331E;
+  --expense:#E0938A; --expense-soft:#3A2523; --income:#8FC29E; --income-soft:#213325;
+}
+*{box-sizing:border-box;}
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:15px; line-height:1.55;}
+h1,h2,h3{font-family:var(--font-head); font-weight:600; margin:0 0 4px;}
+button{font-family:inherit; cursor:pointer;}
+input,select,textarea{font-family:inherit; font-size:14px; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm); padding:8px 10px;}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--primary); outline-offset:1px;}
+table{border-collapse:collapse; width:100%;}
+.num{font-variant-numeric:tabular-nums;}
+
+.app{display:flex; min-height:100vh; max-width:1180px; margin:0 auto;}
+.sidebar{width:220px; flex-shrink:0; padding:28px 18px; display:flex; flex-direction:column; gap:22px; border-right:1px solid var(--line);}
+.brand h1{font-size:21px; color:var(--primary);}
+.brand .tagline{margin:0; font-size:12.5px; color:var(--ink-soft);}
+nav{display:flex; flex-direction:column; gap:2px;}
+.nav-btn{text-align:left; background:none; border:none; padding:10px 12px; border-radius:var(--radius-sm); color:var(--ink-soft); font-size:14.5px; font-weight:500; border-left:2px solid transparent;}
+.nav-btn:hover{background:var(--surface-2); color:var(--ink);}
+.nav-btn.active{background:var(--surface-2); color:var(--primary); border-left:2px solid var(--accent);}
+.sidebar-foot{margin-top:auto; padding-top:16px; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:8px;}
+.sidebar-foot label{font-size:12px; color:var(--ink-soft);}
+.sidebar-foot input{width:100%;}
+.sync-status{font-size:12px; color:var(--ink-soft); margin:0;}
+.sync-status.ok::before{content:"● "; color:var(--income);}
+.sync-status.bad::before{content:"● "; color:var(--expense);}
+
+main{flex:1; padding:28px 32px 60px; min-width:0;}
+.tab{display:none;}
+.tab.active{display:block;}
+.page-head{margin-bottom:22px;}
+.page-head p{color:var(--ink-soft); margin:2px 0 0; font-size:13.5px;}
+
+.card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md); padding:20px;}
+.grid-2{display:grid; grid-template-columns:1.3fr 1fr; gap:16px;}
+.grid-3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+@media (max-width:900px){ .app{flex-direction:column;} .sidebar{width:100%; flex-direction:row; align-items:center; padding:14px 18px;} .sidebar-foot{display:none;} nav{flex-direction:row; overflow-x:auto;} .grid-2,.grid-3{grid-template-columns:1fr;} main{padding:20px;} }
+
+.hero-number{font-family:var(--font-head); font-size:40px; color:var(--expense); margin:6px 0 2px;}
+.hero-label{font-size:13px; color:var(--ink-soft);}
+.stat-row{display:flex; gap:24px; margin-top:14px; flex-wrap:wrap;}
+.stat{min-width:110px;}
+.stat .v{font-size:19px; font-weight:600;}
+.stat .l{font-size:12px; color:var(--ink-soft);}
+
+.bar-row{display:grid; grid-template-columns:88px 1fr 70px; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13.5px;}
+.bar-row:last-child{border-bottom:none;}
+.bar-track{background:var(--surface-2); border-radius:3px; height:9px; overflow:hidden;}
+.bar-fill{background:var(--accent); height:100%;}
+
+.section-title{font-size:15px; margin:26px 0 10px; color:var(--primary); font-weight:600;}
+.section-title:first-child{margin-top:0;}
+
+.ledger-table th{text-align:left; font-size:12px; color:var(--ink-soft); font-weight:500; padding:6px 10px; border-bottom:1px solid var(--line);}
+.ledger-table td{padding:7px 10px; border-bottom:1px solid var(--line); font-size:13.5px; vertical-align:middle;}
+.ledger-table tr:last-child td{border-bottom:none;}
+.amt-expense{color:var(--expense); font-weight:600;}
+.amt-income{color:var(--income); font-weight:600;}
+.tag{display:inline-block; font-size:11.5px; padding:2px 8px; border-radius:20px; background:var(--surface-2); color:var(--ink-soft);}
+
+.btn{background:var(--primary); color:var(--surface); border:none; padding:9px 16px; border-radius:var(--radius-sm); font-size:13.5px; font-weight:600;}
+.btn:hover{background:var(--primary-soft);}
+.btn.secondary{background:none; color:var(--primary); border:1px solid var(--primary);}
+.btn.ghost{background:none; color:var(--ink-soft); border:1px solid var(--line);}
+.btn.danger{background:none; color:var(--expense); border:1px solid var(--expense-soft);}
+.btn:disabled{opacity:0.5; cursor:default;}
+.btn-sm{padding:5px 10px; font-size:12.5px;}
+
+.dropzone{border:1.5px dashed var(--line); border-radius:var(--radius-md); padding:30px 20px; text-align:center; color:var(--ink-soft); font-size:13.5px; cursor:pointer; background:var(--surface);}
+.dropzone.drag{border-color:var(--accent); background:var(--accent-soft);}
+.dropzone strong{color:var(--primary);}
+
+.field-row{display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-bottom:12px;}
+.field{display:flex; flex-direction:column; gap:4px;}
+.field label{font-size:12px; color:var(--ink-soft);}
+
+.toolbar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px;}
+
+.empty{padding:26px; text-align:center; color:var(--ink-soft); font-size:13.5px; border:1px dashed var(--line); border-radius:var(--radius-md);}
+
+.chip{display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); border-radius:20px; padding:4px 10px 4px 12px; font-size:12.5px; margin:3px 4px 3px 0;}
+.chip button{background:none; border:none; color:var(--ink-soft); font-size:14px; line-height:1; padding:0;}
+.cat-card{border:1px solid var(--line); border-radius:var(--radius-md); padding:14px 16px; margin-bottom:12px; background:var(--surface);}
+.cat-card h3{font-size:14.5px; display:flex; justify-content:space-between; align-items:center;}
+.kw-add{display:flex; gap:6px; margin-top:8px;}
+.kw-add input{flex:1; padding:6px 8px; font-size:13px;}
+
+.progress-track{background:var(--surface-2); border-radius:3px; height:8px; overflow:hidden; margin-top:6px;}
+.progress-fill{background:var(--income); height:100%;}
+
+.banner{padding:12px 16px; border-radius:var(--radius-sm); font-size:13px; margin-bottom:16px;}
+.banner.warn{background:var(--expense-soft); color:var(--expense);}
+.banner.info{background:var(--accent-soft); color:#5c470f;}
+:root[data-theme="dark"] .banner.info, @media (prefers-color-scheme:dark){ .banner.info{color:var(--accent);} }
+
+select.cat-select{max-width:130px;}
+.small{font-size:12px; color:var(--ink-soft);}
+.mono-input{width:100%;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>📒 우리 가계부</h1>
+      <p class="tagline">함께 쓰는 지출·저축 기록</p>
+    </div>
+    <nav id="navBar">
+      <button class="nav-btn active" data-tab="dashboard">대시보드</button>
+      <button class="nav-btn" data-tab="upload">내역 업로드</button>
+      <button class="nav-btn" data-tab="transactions">거래 내역</button>
+      <button class="nav-btn" data-tab="accounts">저축·잔고</button>
+      <button class="nav-btn" data-tab="categories">카테고리 설정</button>
+    </nav>
+    <div class="sidebar-foot">
+      <label for="userNameInput">내 이름</label>
+      <input id="userNameInput" type="text" placeholder="예: 민준">
+      <p class="sync-status" id="syncStatus">연결 확인 중…</p>
+      <button class="btn ghost btn-sm" id="manualSyncBtn" style="width:100%;">지금 새로고침</button>
+    </div>
+  </aside>
+
+  <main>
+    <div id="apiBanner"></div>
+
+    <section class="tab active" id="tab-dashboard">
+      <div class="page-head">
+        <h2>대시보드</h2>
+        <p>이번 달 지출과 자산 현황을 한눈에 확인해요.</p>
+      </div>
+      <div class="toolbar">
+        <div class="field"><label>기준 월</label><input type="month" id="dashMonth"></div>
+      </div>
+      <div id="dashContent"></div>
+    </section>
+
+    <section class="tab" id="tab-upload">
+      <div class="page-head">
+        <h2>내역 업로드</h2>
+        <p>카드사에서 받은 엑셀·CSV·PDF를 올리거나, 복사한 텍스트를 붙여넣으면 자동으로 항목을 인식해요.</p>
+      </div>
+
+      <div class="card" style="margin-bottom:18px;">
+        <h3 style="margin-bottom:10px;">파일에서 가져오기</h3>
+        <div class="dropzone" id="dropzone">
+          <div><strong>클릭해서 파일 선택</strong> 또는 이 영역에 끌어다 놓기</div>
+          <div class="small" style="margin-top:6px;">CSV · Excel(.xlsx, .xls) · PDF 지원</div>
+        </div>
+        <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.pdf" style="display:none;">
+      </div>
+
+      <div class="card" style="margin-bottom:18px;">
+        <h3 style="margin-bottom:10px;">텍스트로 붙여넣기</h3>
+        <p class="small" style="margin-top:0;">카드사 앱이나 문자에서 복사한 내역을 그대로 붙여넣어도 괜찮아요. (날짜와 금액이 포함된 줄을 자동으로 찾아요)</p>
+        <textarea id="pasteText" rows="6" style="width:100%;" placeholder="예) 2025-05-03 스타벅스 강남점 4,500원&#10;2025-05-04 GS25 편의점 12,300원"></textarea>
+        <div style="margin-top:10px;"><button class="btn secondary" id="parseTextBtn">텍스트에서 내역 추출</button></div>
+      </div>
+
+      <div id="mappingArea"></div>
+      <div id="previewArea"></div>
+    </section>
+
+    <section class="tab" id="tab-transactions">
+      <div class="page-head">
+        <h2>거래 내역</h2>
+        <p>모든 거래를 확인하고 카테고리를 고치거나 직접 추가할 수 있어요.</p>
+      </div>
+      <div class="toolbar">
+        <div class="field"><label>월</label><input type="month" id="txMonth"></div>
+        <div class="field"><label>카테고리</label><select id="txCatFilter"></select></div>
+        <div class="field"><label>구분</label><select id="txTypeFilter">
+          <option value="all">전체</option><option value="expense">지출</option><option value="income">수입</option>
+        </select></div>
+        <div class="field" style="margin-left:auto;"><button class="btn" id="addTxBtn">+ 직접 추가</button></div>
+      </div>
+      <div id="addTxForm"></div>
+      <div id="txListArea"></div>
+    </section>
+
+    <section class="tab" id="tab-accounts">
+      <div class="page-head">
+        <h2>저축·잔고 관리</h2>
+        <p>입출금 통장, 예금, 적금 잔액을 기록하고 목표를 관리해요.</p>
+      </div>
+      <div class="toolbar"><button class="btn" id="addAcctBtn">+ 계좌 추가</button></div>
+      <div id="addAcctForm"></div>
+      <div id="acctSummary"></div>
+      <div id="acctListArea"></div>
+    </section>
+
+    <section class="tab" id="tab-categories">
+      <div class="page-head">
+        <h2>카테고리 설정</h2>
+        <p>자동 분류에 쓰이는 키워드를 관리해요. 키워드에 걸리지 않은 항목은 '미분류'로 남아요.</p>
+      </div>
+      <div class="toolbar">
+        <span class="small" id="uncatCount"></span>
+        <span class="small">미분류 항목은 아래에서 키워드를 추가하면 다음 업로드부터 자동으로 분류돼요.</span>
+      </div>
+      <div id="catAddArea" class="card" style="margin-bottom:16px;">
+        <div class="field-row" style="margin-bottom:0;">
+          <div class="field"><label>새 카테고리 이름</label><input id="newCatName" type="text" placeholder="예: 반려동물"></div>
+          <button class="btn secondary" id="addCatBtn">카테고리 추가</button>
+        </div>
+      </div>
+      <div id="catListArea"></div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* ====== 설정: Code.gs 배포 후 아래 두 값을 꼭 채워주세요 ====== */
+const API_URL = 'https://script.google.com/macros/s/AKfycbzuZ34L5m5zlJTYU-_9TFoKr471kYmyHq0mSA79qNOOqtrSW2VGtEuJOJp4rVYdCN0/exec'; // 예: https://script.google.com/macros/s/AKfycb.../exec
+const API_KEY = '083100';      // Code.gs의 SECRET과 반드시 동일해야 함
+const POLL_MS = 15000; // 자동 새로고침 주기 (15초)
+/* ============================================================ */
+
+const DEFAULT_CATEGORIES = [
+  {name:'식비', keywords:['배달의민족','요기요','쿠팡이츠','김밥','국밥','분식','치킨','피자','버거','식당','반찬','도시락','배달']},
+  {name:'카페·간식', keywords:['스타벅스','이디야','투썸','빽다방','폴바셋','커피','카페','베이커리','빵집']},
+  {name:'교통', keywords:['택시','카카오티','카카오t','티머니','지하철','버스','주유','주차','고속도로','통행료','sk렌터카']},
+  {name:'주거·공과금', keywords:['관리비','전기요금','가스요금','수도요금','도시가스','임대료','월세']},
+  {name:'통신', keywords:['skt','kt','lgu','통신요금','알뜰폰','인터넷요금']},
+  {name:'쇼핑', keywords:['쿠팡','11번가','지마켓','옥션','올리브영','백화점','이마트','홈플러스','무신사']},
+  {name:'문화·여가', keywords:['cgv','메가박스','롯데시네마','넷플릭스','왓챠','유튜브','멜론','스포티파이','공연']},
+  {name:'의료·건강', keywords:['병원','약국','의원','한의원','치과','헬스','필라테스']},
+  {name:'보험', keywords:['보험료','생명보험','손해보험','화재보험']},
+  {name:'교육', keywords:['학원','등록금','교재','인강','문제집']},
+  {name:'여행', keywords:['항공','호텔','여행사','에어비앤비','펜션','리조트']},
+  {name:'경조사', keywords:['축의금','조의금','경조사']},
+  {name:'저축·이체', keywords:['적금','예금','이체']},
+  {name:'기타', keywords:[]},
+];
+
+const state = {
+  configured:false,
+  transactions:[], accounts:[], categories:[],
+  preview:[],
+  uploadContext:null,
+  syncing:false,
+};
+
+/* ---------- API 통신 ---------- */
+function apiConfigured(){
+  return API_URL && API_URL.indexOf('PUT_YOUR_WEB_APP_URL_HERE')===-1 && API_KEY && API_KEY.indexOf('CHANGE_ME_SECRET_KEY')===-1;
+}
+
+async function apiGetAll(){
+  const res = await fetch(`${API_URL}?key=${encodeURIComponent(API_KEY)}&action=all`);
+  const data = await res.json();
+  if(data.error) throw new Error(data.error);
+  return data;
+}
+
+async function apiPost(action, payload){
+  const res = await fetch(API_URL, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'}, // GAS의 CORS 프리플라이트 문제를 피하기 위해 text/plain 사용
+    body: JSON.stringify({key:API_KEY, action, payload}),
+  });
+  const data = await res.json();
+  if(data.error) throw new Error(data.error);
+  return data;
+}
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function pad(n){ return String(n).padStart(2,'0'); }
+function fmtWon(n){ return (Math.round(n||0)).toLocaleString('ko-KR')+'원'; }
+function todayYM(){ const d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1); }
+function getUserName(){ return document.getElementById('userNameInput').value.trim() || '익명'; }
+
+/* ---------- 초기화 ---------- */
+document.addEventListener('DOMContentLoaded', ()=>{
+  document.querySelectorAll('.nav-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  const savedName = localStorage.getItem('budget_userName') || '';
+  document.getElementById('userNameInput').value = savedName;
+  document.getElementById('userNameInput').addEventListener('change', e=>{
+    localStorage.setItem('budget_userName', e.target.value.trim());
+  });
+
+  document.getElementById('dashMonth').value = todayYM();
+  document.getElementById('txMonth').value = todayYM();
+  document.getElementById('dashMonth').addEventListener('change', renderDashboard);
+  document.getElementById('txMonth').addEventListener('change', renderTransactions);
+  document.getElementById('txCatFilter').addEventListener('change', renderTransactions);
+  document.getElementById('txTypeFilter').addEventListener('change', renderTransactions);
+
+  setupUploadUI();
+  document.getElementById('addTxBtn').addEventListener('click', toggleAddTxForm);
+  document.getElementById('addAcctBtn').addEventListener('click', toggleAddAcctForm);
+  document.getElementById('addCatBtn').addEventListener('click', addCategory);
+  document.getElementById('manualSyncBtn').addEventListener('click', ()=>refreshAll(true));
+
+  if(window.pdfjsLib){
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshAll(); });
+
+  initApi();
+});
+
+async function initApi(){
+  const statusEl = document.getElementById('syncStatus');
+  const bannerEl = document.getElementById('apiBanner');
+  if(!apiConfigured()){
+    statusEl.textContent = '연결 설정 필요';
+    statusEl.className = 'sync-status bad';
+    bannerEl.innerHTML = `<div class="banner warn">아직 구글 시트 API가 연결되지 않았어요. index.html 맨 위 API_URL / API_KEY 값을 Code.gs 배포 정보에 맞게 채워주세요.</div>`;
+    state.categories = DEFAULT_CATEGORIES;
+    renderCategories(); renderDashboard(); renderTransactions(); renderAccounts();
+    return;
+  }
+  state.configured = true;
+  bannerEl.innerHTML = '';
+  await refreshAll();
+  setInterval(refreshAll, POLL_MS);
+}
+
+async function refreshAll(manual){
+  if(!state.configured) return;
+  const statusEl = document.getElementById('syncStatus');
+  if(state.syncing) return;
+  state.syncing = true;
+  if(manual) statusEl.textContent = '새로고침 중…';
+  try{
+    const data = await apiGetAll();
+    state.transactions = (data.transactions||[]).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''));
+    state.accounts = data.accounts||[];
+    state.categories = (data.categories && data.categories.length) ? data.categories : DEFAULT_CATEGORIES;
+    if(!data.categories || !data.categories.length){
+      apiPost('saveCategories', {categories: DEFAULT_CATEGORIES}).catch(()=>{});
+    }
+    renderDashboard(); renderTransactions(); renderAccounts(); renderCategories(); renderTxCatFilter();
+    const now = new Date();
+    statusEl.textContent = `마지막 동기화 ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    statusEl.className = 'sync-status ok';
+  }catch(e){
+    console.error(e);
+    statusEl.textContent = '동기화 실패 (연결 확인 필요)';
+    statusEl.className = 'sync-status bad';
+  }
+  state.syncing = false;
+}
+
+/* ---------- 카테고리 매칭 ---------- */
+function matchCategory(desc){
+  const text = (desc||'').toLowerCase();
+  for(const cat of state.categories){
+    if(cat.name==='기타') continue;
+    for(const kw of (cat.keywords||[])){
+      if(kw && text.includes(String(kw).toLowerCase())) return cat.name;
+    }
+  }
+  return '미분류';
+}
+
+/* ---------- 대시보드 ---------- */
+function renderDashboard(){
+  const el = document.getElementById('dashContent');
+  const ym = document.getElementById('dashMonth').value || todayYM();
+  const monthTx = state.transactions.filter(t=> (t.date||'').startsWith(ym));
+  const expense = monthTx.filter(t=>t.type!=='income').reduce((s,t)=>s+Number(t.amount||0),0);
+  const income = monthTx.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount||0),0);
+
+  const byCat = {};
+  monthTx.filter(t=>t.type!=='income').forEach(t=>{
+    const c = t.category || '미분류';
+    byCat[c] = (byCat[c]||0) + Number(t.amount||0);
+  });
+  const catRows = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+  const maxCat = catRows.length ? catRows[0][1] : 1;
+
+  const totalBalance = state.accounts.reduce((s,a)=>s+Number(a.balance||0),0);
+  const byType = {};
+  state.accounts.forEach(a=>{ byType[a.type||'기타']=(byType[a.type||'기타']||0)+Number(a.balance||0); });
+  const byOwner = {};
+  const byOwnerType = {};
+  state.accounts.forEach(a=>{
+    const owner = a.owner || '미지정';
+    byOwner[owner] = (byOwner[owner]||0) + Number(a.balance||0);
+    byOwnerType[owner] = byOwnerType[owner] || {};
+    byOwnerType[owner][a.type||'기타'] = (byOwnerType[owner][a.type||'기타']||0) + Number(a.balance||0);
+  });
+  const ownerRows = Object.entries(byOwner).sort((a,b)=>b[1]-a[1]);
+  const maxOwner = ownerRows.length ? ownerRows[0][1] : 1;
+
+  // 최근 6개월 지출 추이
+  const months = [];
+  const base = new Date(ym+'-01T00:00:00');
+  for(let i=5;i>=0;i--){
+    const d = new Date(base.getFullYear(), base.getMonth()-i, 1);
+    months.push(d.getFullYear()+'-'+pad(d.getMonth()+1));
+  }
+  const trend = months.map(m=>({
+    m, total: state.transactions.filter(t=>t.type!=='income' && (t.date||'').startsWith(m)).reduce((s,t)=>s+Number(t.amount||0),0)
+  }));
+  const maxTrend = Math.max(1, ...trend.map(t=>t.total));
+
+  const recent = state.transactions.slice(0,6);
+
+  el.innerHTML = `
+    <div class="grid-2">
+      <div class="card">
+        <div class="hero-label">${esc(ym)} 총 지출</div>
+        <div class="hero-number num">${fmtWon(expense)}</div>
+        <div class="stat-row">
+          <div class="stat"><div class="v num" style="color:var(--income)">${fmtWon(income)}</div><div class="l">수입</div></div>
+          <div class="stat"><div class="v num">${fmtWon(income-expense)}</div><div class="l">이번 달 순증감</div></div>
+          <div class="stat"><div class="v num">${monthTx.length}</div><div class="l">거래 건수</div></div>
+        </div>
+        <div class="section-title">카테고리별 지출</div>
+        ${catRows.length ? catRows.map(([name,amt])=>`
+          <div class="bar-row">
+            <span>${esc(name)}</span>
+            <span class="bar-track"><span class="bar-fill" style="width:${Math.max(3,amt/maxCat*100)}%"></span></span>
+            <span class="num" style="text-align:right;">${fmtWon(amt)}</span>
+          </div>`).join('') : '<div class="empty">이번 달 지출 내역이 없어요.</div>'}
+        <div class="section-title">최근 6개월 지출 추이</div>
+        ${trend.map(t=>`
+          <div class="bar-row">
+            <span>${t.m.slice(5)}월</span>
+            <span class="bar-track"><span class="bar-fill" style="width:${Math.max(3,t.total/maxTrend*100)}%; background:var(--primary-soft);"></span></span>
+            <span class="num" style="text-align:right;">${fmtWon(t.total)}</span>
+          </div>`).join('')}
+      </div>
+      <div class="card">
+        <div class="hero-label">우리 총 자산</div>
+        <div class="hero-number num" style="color:var(--income);">${fmtWon(totalBalance)}</div>
+        <div class="small" style="margin-bottom:10px;">${state.accounts.length}개 계좌</div>
+        ${Object.entries(byType).map(([type,amt])=>`
+          <div class="bar-row"><span>${esc(type)}</span><span></span><span class="num" style="text-align:right;">${fmtWon(amt)}</span></div>
+        `).join('') || '<div class="empty">등록된 계좌가 없어요.</div>'}
+        ${ownerRows.length ? `
+        <div class="section-title">사람별 자산</div>
+        ${ownerRows.map(([owner,amt])=>{
+          const breakdown = Object.entries(byOwnerType[owner]||{}).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`${esc(t)} ${fmtWon(v)}`).join(' · ');
+          return `
+          <div class="bar-row">
+            <span>${esc(owner)}</span>
+            <span class="bar-track"><span class="bar-fill" style="width:${Math.max(3,amt/maxOwner*100)}%; background:var(--income);"></span></span>
+            <span class="num" style="text-align:right;">${fmtWon(amt)}</span>
+          </div>
+          <div class="small" style="margin:-2px 0 4px;">${breakdown}</div>`;
+        }).join('')}` : ''}
+        <div class="section-title">최근 거래</div>
+        ${recent.length ? `<table class="ledger-table">${recent.map(t=>`
+          <tr>
+            <td class="small">${esc((t.date||'').slice(5))}</td>
+            <td>${esc(t.description||'')}<div class="small">${esc(t.category||'')}</div></td>
+            <td class="num ${t.type==='income'?'amt-income':'amt-expense'}" style="text-align:right;">${t.type==='income'?'+':'-'}${fmtWon(t.amount)}</td>
+          </tr>`).join('')}</table>` : '<div class="empty">아직 기록된 거래가 없어요.</div>'}
+      </div>
+    </div>
+  `;
+}
+
+/* ---------- 업로드 ---------- */
+function setupUploadUI(){
+  const dz = document.getElementById('dropzone');
+  const fi = document.getElementById('fileInput');
+  dz.addEventListener('click', ()=>fi.click());
+  dz.addEventListener('dragover', e=>{ e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', ()=> dz.classList.remove('drag'));
+  dz.addEventListener('drop', e=>{
+    e.preventDefault(); dz.classList.remove('drag');
+    if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+  fi.addEventListener('change', e=>{
+    if(e.target.files.length) handleFile(e.target.files[0]);
+    fi.value = '';
+  });
+  document.getElementById('parseTextBtn').addEventListener('click', ()=>{
+    const text = document.getElementById('pasteText').value;
+    if(!text.trim()){ alert('붙여넣은 텍스트가 없어요.'); return; }
+    const rows = parseTextBlock(text, '직접 붙여넣기');
+    showPreview(rows);
+  });
+}
+
+function handleFile(file){
+  const ext = file.name.split('.').pop().toLowerCase();
+  document.getElementById('mappingArea').innerHTML = '';
+  document.getElementById('previewArea').innerHTML = '<div class="empty">파일을 읽는 중이에요…</div>';
+  if(['csv','xlsx','xls'].includes(ext)){
+    parseSpreadsheet(file);
+  }else if(ext==='pdf'){
+    parsePdf(file);
+  }else{
+    document.getElementById('previewArea').innerHTML = '';
+    alert('CSV, Excel(.xlsx/.xls), PDF 파일만 지원해요.');
+  }
+}
+
+const HEADER_HINTS = {
+  date: ['날짜','이용일','거래일','승인일','일시','이용일자','승인일자'],
+  amount: ['금액','이용금액','승인금액','출금액','거래금액','결제금액'],
+  desc: ['가맹점','내용','적요','이용가맹점','거래내용','상호','가맹점명'],
+  type: ['구분','거래구분','입출금','유형']
+};
+
+function parseSpreadsheet(file){
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      const wb = XLSX.read(e.target.result, {type:'array'});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false, defval:''}).map(r=>r.map(c=>String(c==null?'':c).trim()));
+      const nonEmpty = rows.filter(r=>r.some(c=>c!==''));
+      if(!nonEmpty.length){ document.getElementById('previewArea').innerHTML = '<div class="empty">읽을 수 있는 내용이 없어요.</div>'; return; }
+      showMapping(nonEmpty, file.name);
+    }catch(err){
+      console.error(err);
+      document.getElementById('previewArea').innerHTML = '<div class="banner warn">파일을 읽는 데 실패했어요. 형식을 확인해주세요.</div>';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function scoreHeaderRow(row){
+  let score = 0;
+  const joined = row.join(' ').toLowerCase();
+  Object.values(HEADER_HINTS).flat().forEach(h=>{ if(joined.includes(h.toLowerCase())) score++; });
+  return score;
+}
+
+function showMapping(rows, sourceName){
+  let headerIdx = 0, bestScore = -1;
+  for(let i=0;i<Math.min(15, rows.length); i++){
+    const s = scoreHeaderRow(rows[i]);
+    if(s > bestScore){ bestScore = s; headerIdx = i; }
+  }
+  const headers = rows[headerIdx];
+  const dataRows = rows.slice(headerIdx+1).filter(r=>r.some(c=>c!==''));
+  state.uploadContext = { headers, dataRows, sourceName };
+
+  function guess(field){
+    const hints = HEADER_HINTS[field];
+    for(let i=0;i<headers.length;i++){
+      const h = (headers[i]||'').toLowerCase();
+      if(hints.some(k=>h.includes(k.toLowerCase()))) return i;
+    }
+    return -1;
+  }
+  const guesses = { date:guess('date'), amount:guess('amount'), desc:guess('desc'), type:guess('type') };
+
+  const opts = (selected)=> headers.map((h,i)=>`<option value="${i}" ${i===selected?'selected':''}>${esc(h||('컬럼 '+(i+1)))}</option>`).join('') + `<option value="-1" ${selected===-1?'selected':''}>(없음)</option>`;
+
+  document.getElementById('mappingArea').innerHTML = `
+    <div class="card" style="margin-bottom:18px;">
+      <h3 style="margin-bottom:4px;">열 매칭 확인</h3>
+      <p class="small" style="margin-top:0;">헤더 행을 <strong>${headerIdx+1}번째 줄</strong>로 인식했어요. 아래에서 어떤 열이 무엇인지 확인해주세요. (총 ${dataRows.length}행)</p>
+      <div class="field-row">
+        <div class="field"><label>날짜</label><select id="mapDate">${opts(guesses.date)}</select></div>
+        <div class="field"><label>내용/가맹점</label><select id="mapDesc">${opts(guesses.desc)}</select></div>
+        <div class="field"><label>금액</label><select id="mapAmount">${opts(guesses.amount)}</select></div>
+        <div class="field"><label>입출금 구분 (선택)</label><select id="mapType">${opts(guesses.type)}</select></div>
+      </div>
+      <button class="btn" id="buildPreviewBtn">미리보기 만들기</button>
+    </div>
+  `;
+  document.getElementById('buildPreviewBtn').addEventListener('click', buildPreviewFromMapping);
+}
+
+function normalizeDate(raw, fallbackYear){
+  if(raw==null) return null;
+  let s = String(raw).trim();
+  if(!s) return null;
+  if(/^\d+(\.\d+)?$/.test(s) && Number(s) > 20000 && Number(s) < 60000){
+    const d = new Date(Math.round((Number(s)-25569)*86400*1000));
+    if(!isNaN(d)) return d.toISOString().slice(0,10);
+  }
+  s = s.replace(/[./]/g,'-');
+  let m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m = s.match(/^(\d{2})-(\d{1,2})-(\d{1,2})/);
+  if(m) return `20${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m = s.match(/(\d{1,2})-(\d{1,2})/);
+  if(m){ const year = fallbackYear || new Date().getFullYear(); return `${year}-${pad(m[1])}-${pad(m[2])}`; }
+  return null;
+}
+
+function normalizeAmount(raw){
+  if(raw==null) return 0;
+  let s = String(raw).trim();
+  if(!s) return 0;
+  const neg = /-/.test(s) || /\(.*\)/.test(s);
+  s = s.replace(/[^0-9.]/g,'');
+  if(!s) return 0;
+  const n = parseFloat(s);
+  if(isNaN(n)) return 0;
+  return neg ? -n : n;
+}
+
+function buildPreviewFromMapping(){
+  const ctx = state.uploadContext;
+  const dateIdx = Number(document.getElementById('mapDate').value);
+  const descIdx = Number(document.getElementById('mapDesc').value);
+  const amountIdx = Number(document.getElementById('mapAmount').value);
+  const typeIdx = Number(document.getElementById('mapType').value);
+  if(dateIdx<0 || amountIdx<0){ alert('날짜와 금액 열은 반드시 선택해야 해요.'); return; }
+
+  const rows = [];
+  ctx.dataRows.forEach(r=>{
+    const date = normalizeDate(r[dateIdx]);
+    const amountRaw = normalizeAmount(r[amountIdx]);
+    if(!date || !amountRaw) return;
+    let type = 'expense';
+    if(amountRaw < 0){
+      type = 'expense';
+    }else if(amountRaw > 0){
+      type = 'expense';
+      if(typeIdx>=0){
+        const tval = (r[typeIdx]||'').toLowerCase();
+        if(tval.includes('입금') || tval.includes('수입') || tval.includes('환불') || tval.includes('적립') || tval.includes('이자')) type = 'income';
+      }
+    }
+    rows.push({
+      date, description: descIdx>=0 ? r[descIdx] : '', amount: Math.abs(amountRaw), type,
+      category: matchCategory(descIdx>=0 ? r[descIdx] : ''), source: ctx.sourceName
+    });
+  });
+  if(!rows.length){ document.getElementById('previewArea').innerHTML = '<div class="banner warn">인식된 거래가 없어요. 열 매칭을 다시 확인해주세요.</div>'; return; }
+  showPreview(rows);
+}
+
+function parseLineToTxn(line, sourceName){
+  const dateRe = /(\d{4}[.\-\/]\d{1,2}[.\-\/]\d{1,2}|\d{2}[.\-\/]\d{1,2}[.\-\/]\d{1,2}|\d{1,2}[.\-\/]\d{1,2})/;
+  const dm = line.match(dateRe);
+  if(!dm) return null;
+  const amtRe = /-?[\d]{1,3}(,\d{3})+|-?\d{4,}/g;
+  const amounts = line.match(amtRe);
+  if(!amounts || !amounts.length) return null;
+  let best = amounts[0];
+  amounts.forEach(a=>{ if(Math.abs(normalizeAmount(a)) > Math.abs(normalizeAmount(best))) best = a; });
+  const amount = normalizeAmount(best);
+  if(!amount) return null;
+  const date = normalizeDate(dm[0]);
+  if(!date) return null;
+  let desc = line.replace(dm[0],'').replace(best,'').replace(/\s+/g,' ').trim();
+  desc = desc.replace(/^[\-:|]+|[\-:|]+$/g,'').trim();
+  let type = 'expense';
+  const lower = line.toLowerCase();
+  if(amount > 0 && (lower.includes('입금') || lower.includes('수입') || lower.includes('환불') || lower.includes('적립'))) type = 'income';
+  return { date, description: desc || '내용 확인 필요', amount: Math.abs(amount), type, category: matchCategory(desc), source: sourceName };
+}
+
+function parseTextBlock(text, sourceName){
+  const lines = text.split(/\n/).map(l=>l.trim()).filter(Boolean);
+  const rows = [];
+  lines.forEach(line=>{
+    const t = parseLineToTxn(line, sourceName);
+    if(t) rows.push(t);
+  });
+  return rows;
+}
+
+function extractPdfLines(items){
+  const pts = items.map(it=>({str:it.str, x:it.transform[4], y:it.transform[5]})).sort((a,b)=> b.y-a.y || a.x-b.x);
+  const lines = []; let current = []; let lastY = null;
+  pts.forEach(p=>{
+    if(lastY===null || Math.abs(p.y-lastY)<=2.5){ current.push(p); }
+    else { lines.push(current); current=[p]; }
+    lastY = p.y;
+  });
+  if(current.length) lines.push(current);
+  return lines.map(l=> l.sort((a,b)=>a.x-b.x).map(i=>i.str).join(' ').replace(/\s+/g,' ').trim()).filter(Boolean);
+}
+
+async function parsePdf(file){
+  try{
+    if(!window.pdfjsLib) throw new Error('pdf.js 로드 실패');
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+    let allLines = [];
+    for(let i=1;i<=pdf.numPages;i++){
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      allLines = allLines.concat(extractPdfLines(content.items));
+    }
+    const rows = [];
+    allLines.forEach(line=>{ const t = parseLineToTxn(line, file.name); if(t) rows.push(t); });
+    if(!rows.length){
+      document.getElementById('previewArea').innerHTML = `
+        <div class="banner warn">PDF에서 자동으로 거래를 찾지 못했어요. PDF를 열어 내용을 복사한 뒤 위의 "텍스트로 붙여넣기"를 이용해주세요.</div>`;
+      document.getElementById('pasteText').value = allLines.join('\n');
+      return;
+    }
+    showPreview(rows);
+  }catch(err){
+    console.error(err);
+    document.getElementById('previewArea').innerHTML = `
+      <div class="banner warn">PDF를 읽는 데 실패했어요. PDF를 열어 내용을 복사한 뒤 위의 "텍스트로 붙여넣기"를 이용해주세요.</div>`;
+  }
+}
+
+function categoryOptionsHtml(selected){
+  return state.categories.map(c=>`<option value="${esc(c.name)}" ${c.name===selected?'selected':''}>${esc(c.name)}</option>`).join('')
+    + (state.categories.some(c=>c.name===selected) ? '' : `<option value="${esc(selected)}" selected>${esc(selected)}</option>`);
+}
+
+function showPreview(rows){
+  state.preview = rows;
+  const el = document.getElementById('previewArea');
+  el.innerHTML = `
+    <div class="card">
+      <h3 style="margin-bottom:6px;">가져올 내역 미리보기 (${rows.length}건)</h3>
+      <p class="small" style="margin-top:0;">저장 전에 내용을 확인하고 필요한 부분을 고쳐주세요.</p>
+      <div style="overflow-x:auto;">
+      <table class="ledger-table" id="previewTable">
+        <thead><tr><th>날짜</th><th>내용</th><th>구분</th><th>금액</th><th>카테고리</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((r,i)=>`
+            <tr data-idx="${i}">
+              <td><input type="date" class="pv-date" value="${esc(r.date)}" style="width:130px;"></td>
+              <td><input type="text" class="pv-desc" value="${esc(r.description)}" style="width:180px;"></td>
+              <td><select class="pv-type"><option value="expense" ${r.type==='expense'?'selected':''}>지출</option><option value="income" ${r.type==='income'?'selected':''}>수입</option></select></td>
+              <td><input type="number" class="pv-amount num" value="${Math.round(r.amount)}" style="width:100px;"></td>
+              <td><select class="pv-cat cat-select">${categoryOptionsHtml(r.category)}</select></td>
+              <td><button class="btn ghost btn-sm pv-remove">삭제</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>
+      <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
+        <button class="btn" id="importBtn">가져오기 (${rows.length}건)</button>
+        <button class="btn ghost" id="cancelPreviewBtn">취소</button>
+        <span class="small" id="importProgress"></span>
+      </div>
+    </div>
+  `;
+  el.querySelectorAll('.pv-remove').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ btn.closest('tr').remove(); updateImportBtnLabel(); });
+  });
+  document.getElementById('cancelPreviewBtn').addEventListener('click', ()=>{ el.innerHTML=''; document.getElementById('mappingArea').innerHTML=''; });
+  document.getElementById('importBtn').addEventListener('click', importPreviewRows);
+}
+
+function updateImportBtnLabel(){
+  const n = document.querySelectorAll('#previewTable tbody tr').length;
+  const btn = document.getElementById('importBtn');
+  if(btn) btn.textContent = `가져오기 (${n}건)`;
+}
+
+async function importPreviewRows(){
+  if(!state.configured){ alert('아직 구글 시트 연결 설정이 안 되어 있어요.'); return; }
+  const trs = Array.from(document.querySelectorAll('#previewTable tbody tr'));
+  if(!trs.length){ alert('가져올 내역이 없어요.'); return; }
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true;
+  const progressEl = document.getElementById('importProgress');
+  let ok=0, fail=0;
+  for(let i=0;i<trs.length;i++){
+    const tr = trs[i];
+    const date = tr.querySelector('.pv-date').value;
+    const description = tr.querySelector('.pv-desc').value.trim();
+    const type = tr.querySelector('.pv-type').value;
+    const amount = Number(tr.querySelector('.pv-amount').value);
+    const category = tr.querySelector('.pv-cat').value;
+    progressEl.textContent = `저장 중… (${i+1}/${trs.length})`;
+    if(!date || !amount){ fail++; continue; }
+    try{
+      await apiPost('addTransaction', { date, description, amount: Math.abs(amount), type, category, addedBy:getUserName() });
+      ok++;
+    }catch(e){ console.error(e); fail++; }
+  }
+  progressEl.textContent = '';
+  btn.disabled = false;
+  alert(`${ok}건 저장했어요.${fail?` (${fail}건 실패)`:''}`);
+  document.getElementById('previewArea').innerHTML = '';
+  document.getElementById('mappingArea').innerHTML = '';
+  document.getElementById('pasteText').value = '';
+  refreshAll();
+}
+
+/* ---------- 거래 내역 탭 ---------- */
+function renderTxCatFilter(){
+  const sel = document.getElementById('txCatFilter');
+  const current = sel.value;
+  sel.innerHTML = '<option value="all">전체</option>' + state.categories.map(c=>`<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('') + '<option value="미분류">미분류</option>';
+  if(current) sel.value = current;
+}
+
+function toggleAddTxForm(){
+  const el = document.getElementById('addTxForm');
+  if(el.innerHTML){ el.innerHTML=''; return; }
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="field-row">
+        <div class="field"><label>날짜</label><input type="date" id="newTxDate" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div class="field"><label>내용</label><input type="text" id="newTxDesc" placeholder="예: 현금 결제"></div>
+        <div class="field"><label>구분</label><select id="newTxType"><option value="expense">지출</option><option value="income">수입</option></select></div>
+        <div class="field"><label>금액</label><input type="number" id="newTxAmount" placeholder="0"></div>
+        <div class="field"><label>카테고리</label><select id="newTxCat">${state.categories.map(c=>`<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}</select></div>
+        <button class="btn" id="saveNewTxBtn">저장</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('saveNewTxBtn').addEventListener('click', async ()=>{
+    if(!state.configured){ alert('아직 구글 시트 연결 설정이 안 되어 있어요.'); return; }
+    const date = document.getElementById('newTxDate').value;
+    const amount = Number(document.getElementById('newTxAmount').value);
+    if(!date || !amount){ alert('날짜와 금액을 입력해주세요.'); return; }
+    await apiPost('addTransaction', {
+      date, description: document.getElementById('newTxDesc').value.trim(),
+      type: document.getElementById('newTxType').value, amount: Math.abs(amount),
+      category: document.getElementById('newTxCat').value, addedBy:getUserName()
+    });
+    document.getElementById('addTxForm').innerHTML = '';
+    refreshAll();
+  });
+}
+
+function renderTransactions(){
+  renderTxCatFilter();
+  const ym = document.getElementById('txMonth').value;
+  const catF = document.getElementById('txCatFilter').value;
+  const typeF = document.getElementById('txTypeFilter').value;
+  let list = state.transactions.filter(t=> !ym || (t.date||'').startsWith(ym));
+  if(catF && catF!=='all') list = list.filter(t=>(t.category||'미분류')===catF);
+  if(typeF && typeF!=='all') list = list.filter(t=>t.type===typeF);
+
+  const el = document.getElementById('txListArea');
+  if(!list.length){ el.innerHTML = '<div class="empty">해당 조건의 거래가 없어요.</div>'; return; }
+
+  el.innerHTML = `
+    <div style="overflow-x:auto;">
+    <table class="ledger-table">
+      <thead><tr><th>날짜</th><th>내용</th><th>카테고리</th><th>작성자</th><th style="text-align:right;">금액</th><th></th></tr></thead>
+      <tbody>
+        ${list.map(t=>`
+          <tr data-id="${t.id}">
+            <td class="small">${esc(t.date||'')}</td>
+            <td>${esc(t.description||'')}</td>
+            <td><select class="cat-select tx-cat-edit">${categoryOptionsHtml(t.category||'미분류')}</select></td>
+            <td class="small">${esc(t.addedBy||'')}</td>
+            <td class="num ${t.type==='income'?'amt-income':'amt-expense'}" style="text-align:right;">${t.type==='income'?'+':'-'}${fmtWon(t.amount)}</td>
+            <td><button class="btn ghost btn-sm tx-del">삭제</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+    </div>
+  `;
+  el.querySelectorAll('.tx-cat-edit').forEach(sel=>{
+    sel.addEventListener('change', async ()=>{
+      const id = sel.closest('tr').dataset.id;
+      if(!state.configured) return;
+      try{ await apiPost('updateTransaction', {id, category: sel.value}); refreshAll(); }catch(e){ console.error(e); }
+    });
+  });
+  el.querySelectorAll('.tx-del').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      if(!confirm('이 거래를 삭제할까요?')) return;
+      const id = btn.closest('tr').dataset.id;
+      if(!state.configured) return;
+      try{ await apiPost('deleteTransaction', {id}); refreshAll(); }catch(e){ console.error(e); }
+    });
+  });
+}
+
+/* ---------- 저축·잔고 탭 ---------- */
+const ASSET_TYPES = ['현금','예금','적금','주식','기타'];
+function assetTypeOptionsHtml(selected){
+  const list = ASSET_TYPES.includes(selected) ? ASSET_TYPES : [selected, ...ASSET_TYPES];
+  return list.map(t=>`<option value="${esc(t)}" ${t===selected?'selected':''}>${esc(t)}</option>`).join('');
+}
+function ownerDatalistHtml(){
+  const owners = Array.from(new Set(state.accounts.map(a=>a.owner).filter(Boolean)));
+  const defaults = ['공동'];
+  const all = Array.from(new Set([...owners, ...defaults]));
+  return `<datalist id="ownerOptions">${all.map(o=>`<option value="${esc(o)}">`).join('')}</datalist>`;
+}
+
+function toggleAddAcctForm(){
+  const el = document.getElementById('addAcctForm');
+  if(el.innerHTML){ el.innerHTML=''; return; }
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      ${ownerDatalistHtml()}
+      <div class="field-row">
+        <div class="field"><label>계좌 이름</label><input type="text" id="newAcctName" placeholder="예: 삼성증권"></div>
+        <div class="field"><label>소유자</label><input type="text" id="newAcctOwner" list="ownerOptions" placeholder="예: 조성우"></div>
+        <div class="field"><label>자산유형</label><select id="newAcctType">${assetTypeOptionsHtml('현금')}</select></div>
+        <div class="field"><label>현재 잔액/평가금액</label><input type="number" id="newAcctBalance" placeholder="0"></div>
+        <div class="field"><label>목표 금액 (선택)</label><input type="number" id="newAcctTarget" placeholder="0"></div>
+        <button class="btn" id="saveNewAcctBtn">저장</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('saveNewAcctBtn').addEventListener('click', async ()=>{
+    if(!state.configured){ alert('아직 구글 시트 연결 설정이 안 되어 있어요.'); return; }
+    const name = document.getElementById('newAcctName').value.trim();
+    if(!name){ alert('계좌 이름을 입력해주세요.'); return; }
+    await apiPost('addAccount', {
+      name, owner: document.getElementById('newAcctOwner').value.trim() || '미지정',
+      type: document.getElementById('newAcctType').value,
+      balance: Number(document.getElementById('newAcctBalance').value)||0,
+      targetAmount: Number(document.getElementById('newAcctTarget').value)||0,
+      addedBy:getUserName()
+    });
+    document.getElementById('addAcctForm').innerHTML = '';
+    refreshAll();
+  });
+}
+
+function renderAccounts(){
+  const sumEl = document.getElementById('acctSummary');
+  const total = state.accounts.reduce((s,a)=>s+Number(a.balance||0),0);
+  sumEl.innerHTML = `<div class="card" style="margin-bottom:16px;"><div class="hero-label">전체 잔고 합계</div><div class="hero-number num" style="color:var(--income);">${fmtWon(total)}</div></div>`;
+
+  const el = document.getElementById('acctListArea');
+  if(!state.accounts.length){ el.innerHTML = '<div class="empty">등록된 계좌가 없어요. 위에서 추가해보세요.</div>'; return; }
+  el.innerHTML = ownerDatalistHtml() + state.accounts.map(a=>{
+    const pct = a.targetAmount ? Math.min(100, Math.round(Number(a.balance||0)/Number(a.targetAmount)*100)) : null;
+    return `
+    <div class="card" style="margin-bottom:12px;" data-id="${a.id}">
+      <div class="field-row" style="margin-bottom:4px; align-items:center;">
+        <div style="min-width:120px;"><strong>${esc(a.name)}</strong></div>
+        <div class="field"><label>소유자</label><input type="text" class="acct-owner" list="ownerOptions" value="${esc(a.owner||'미지정')}" style="width:100px;"></div>
+        <div class="field"><label>자산유형</label><select class="acct-type">${assetTypeOptionsHtml(a.type)}</select></div>
+        <div class="field"><label>잔액/평가금액</label><input type="number" class="acct-balance" value="${Math.round(a.balance||0)}" style="width:130px;"></div>
+        <div class="field"><label>목표금액</label><input type="number" class="acct-target" value="${Math.round(a.targetAmount||0)}" style="width:130px;"></div>
+        <button class="btn secondary btn-sm acct-save">저장</button>
+        <button class="btn danger btn-sm acct-del">삭제</button>
+      </div>
+      ${pct!==null ? `<div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div><div class="small">목표 대비 ${pct}%</div>` : ''}
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('.acct-save').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const card = btn.closest('[data-id]');
+      const id = card.dataset.id;
+      const balance = Number(card.querySelector('.acct-balance').value)||0;
+      const targetAmount = Number(card.querySelector('.acct-target').value)||0;
+      const owner = card.querySelector('.acct-owner').value.trim() || '미지정';
+      const type = card.querySelector('.acct-type').value;
+      if(!state.configured) return;
+      try{ await apiPost('updateAccount', {id, balance, targetAmount, owner, type}); refreshAll(); }catch(e){ console.error(e); }
+    });
+  });
+  el.querySelectorAll('.acct-del').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      if(!confirm('이 계좌를 삭제할까요?')) return;
+      const id = btn.closest('[data-id]').dataset.id;
+      if(!state.configured) return;
+      try{ await apiPost('deleteAccount', {id}); refreshAll(); }catch(e){ console.error(e); }
+    });
+  });
+}
+
+/* ---------- 카테고리 설정 탭 ---------- */
+function renderCategories(){
+  const el = document.getElementById('catListArea');
+  el.innerHTML = state.categories.map((c,ci)=>`
+    <div class="cat-card" data-idx="${ci}">
+      <h3>${esc(c.name)} ${c.name!=='기타' ? `<button class="btn ghost btn-sm cat-del">카테고리 삭제</button>` : ''}</h3>
+      <div class="kw-list">${(c.keywords||[]).map((kw,ki)=>`<span class="chip">${esc(kw)}<button class="kw-del" data-ki="${ki}">×</button></span>`).join('') || '<span class="small">키워드 없음</span>'}</div>
+      <div class="kw-add"><input type="text" class="kw-input" placeholder="키워드 추가 (예: 스타벅스)"><button class="btn secondary btn-sm kw-add-btn">추가</button></div>
+    </div>
+  `).join('');
+
+  const uncat = state.transactions.filter(t=> !t.category || t.category==='미분류').length;
+  document.getElementById('uncatCount').textContent = uncat ? `미분류 ${uncat}건` : '미분류 항목 없음';
+
+  el.querySelectorAll('.cat-del').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const idx = Number(btn.closest('.cat-card').dataset.idx);
+      if(!confirm(`'${state.categories[idx].name}' 카테고리를 삭제할까요? 이미 저장된 거래의 분류는 유지돼요.`)) return;
+      const next = state.categories.slice();
+      next.splice(idx,1);
+      saveCategories(next);
+    });
+  });
+  el.querySelectorAll('.kw-del').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const card = btn.closest('.cat-card');
+      const idx = Number(card.dataset.idx);
+      const ki = Number(btn.dataset.ki);
+      const next = state.categories.map(c=>({...c, keywords:[...(c.keywords||[])]}));
+      next[idx].keywords.splice(ki,1);
+      saveCategories(next);
+    });
+  });
+  el.querySelectorAll('.kw-add-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const card = btn.closest('.cat-card');
+      const idx = Number(card.dataset.idx);
+      const input = card.querySelector('.kw-input');
+      const val = input.value.trim();
+      if(!val) return;
+      const next = state.categories.map(c=>({...c, keywords:[...(c.keywords||[])]}));
+      next[idx].keywords.push(val);
+      saveCategories(next);
+    });
+  });
+}
+
+function addCategory(){
+  const input = document.getElementById('newCatName');
+  const name = input.value.trim();
+  if(!name) return;
+  if(state.categories.some(c=>c.name===name)){ alert('이미 있는 카테고리예요.'); return; }
+  const next = [...state.categories.filter(c=>c.name!=='기타'), {name, keywords:[]}, ...state.categories.filter(c=>c.name==='기타')];
+  saveCategories(next);
+  input.value = '';
+}
+
+async function saveCategories(next){
+  state.categories = next;
+  renderCategories();
+  renderTxCatFilter();
+  if(state.configured){
+    try{ await apiPost('saveCategories', {categories: next}); }catch(e){ console.error(e); }
+  }
+}
+</script>
+</body>
+</html>
