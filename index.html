@@ -174,6 +174,7 @@ select.cat-select{max-width:130px;}
       <button class="nav-btn" data-tab="transactions">거래 내역</button>
       <button class="nav-btn" data-tab="accounts">저축·잔고</button>
       <button class="nav-btn" data-tab="categories">카테고리 설정</button>
+      <button class="nav-btn" data-tab="activity">활동 기록</button>
     </nav>
     <div class="sidebar-foot">
       <label for="userNameInput">내 이름</label>
@@ -270,6 +271,14 @@ select.cat-select{max-width:130px;}
       <div id="catListArea"></div>
     </section>
 
+    <section class="tab" id="tab-activity">
+      <div class="page-head">
+        <h2>활동 기록</h2>
+        <p>누가 언제 무엇을 추가·수정·삭제했는지 최근 기록이에요.</p>
+      </div>
+      <div id="activityListArea"></div>
+    </section>
+
   </main>
 </div>
 
@@ -300,7 +309,7 @@ const DEFAULT_CATEGORIES = [
 
 const state = {
   configured:false,
-  transactions:[], accounts:[], categories:[],
+  transactions:[], accounts:[], categories:[], activityLog:[],
   preview:[],
   uploadContext:null,
   syncing:false,
@@ -432,10 +441,11 @@ async function refreshAll(manual){
     state.transactions = (data.transactions||[]).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''));
     state.accounts = data.accounts||[];
     state.categories = (data.categories && data.categories.length) ? data.categories : DEFAULT_CATEGORIES;
+    state.activityLog = (data.activityLog || []).slice().sort((a,b)=> (b.time||'').localeCompare(a.time||''));
     if(!data.categories || !data.categories.length){
-      apiPost('saveCategories', {categories: DEFAULT_CATEGORIES}).catch(()=>{});
+      apiPost('saveCategories', {categories: DEFAULT_CATEGORIES, who:'시스템'}).catch(()=>{});
     }
-    renderDashboard(); renderTransactions(); renderAccounts(); renderCategories(); renderTxCatFilter();
+    renderDashboard(); renderTransactions(); renderAccounts(); renderCategories(); renderTxCatFilter(); renderActivityLog();
     const now = new Date();
     statusEl.textContent = `마지막 동기화 ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     statusEl.className = 'sync-status ok';
@@ -864,7 +874,7 @@ async function importPreviewRows(){
     progressEl.textContent = `저장 중… (${i+1}/${trs.length})`;
     if(!date || !amount){ fail++; continue; }
     try{
-      await apiPost('addTransaction', { date, description, amount: Math.abs(amount), type, category, addedBy:getUserName() });
+      await apiPost('addTransaction', { date, description, amount: Math.abs(amount), type, category, addedBy:getUserName(), who:getUserName() });
       ok++;
     }catch(e){ console.error(e); fail++; }
   }
@@ -908,7 +918,7 @@ function toggleAddTxForm(){
     await apiPost('addTransaction', {
       date, description: document.getElementById('newTxDesc').value.trim(),
       type: document.getElementById('newTxType').value, amount: Math.abs(amount),
-      category: document.getElementById('newTxCat').value, addedBy:getUserName()
+      category: document.getElementById('newTxCat').value, addedBy:getUserName(), who:getUserName()
     });
     document.getElementById('addTxForm').innerHTML = '';
     refreshAll();
@@ -949,7 +959,7 @@ function renderTransactions(){
     sel.addEventListener('change', async ()=>{
       const id = sel.closest('tr').dataset.id;
       if(!state.configured) return;
-      try{ await apiPost('updateTransaction', {id, category: sel.value}); refreshAll(); }catch(e){ console.error(e); }
+      try{ await apiPost('updateTransaction', {id, category: sel.value, who:getUserName()}); refreshAll(); }catch(e){ console.error(e); }
     });
   });
   el.querySelectorAll('.tx-del').forEach(btn=>{
@@ -957,7 +967,7 @@ function renderTransactions(){
       if(!confirm('이 거래를 삭제할까요?')) return;
       const id = btn.closest('tr').dataset.id;
       if(!state.configured) return;
-      try{ await apiPost('deleteTransaction', {id}); refreshAll(); }catch(e){ console.error(e); }
+      try{ await apiPost('deleteTransaction', {id, who:getUserName()}); refreshAll(); }catch(e){ console.error(e); }
     });
   });
 }
@@ -1000,7 +1010,7 @@ function toggleAddAcctForm(){
       type: document.getElementById('newAcctType').value,
       balance: Number(document.getElementById('newAcctBalance').value)||0,
       targetAmount: Number(document.getElementById('newAcctTarget').value)||0,
-      addedBy:getUserName()
+      addedBy:getUserName(), who:getUserName()
     });
     document.getElementById('addAcctForm').innerHTML = '';
     refreshAll();
@@ -1040,7 +1050,7 @@ function renderAccounts(){
       const owner = card.querySelector('.acct-owner').value.trim() || '미지정';
       const type = card.querySelector('.acct-type').value;
       if(!state.configured) return;
-      try{ await apiPost('updateAccount', {id, balance, targetAmount, owner, type}); refreshAll(); }catch(e){ console.error(e); }
+      try{ await apiPost('updateAccount', {id, balance, targetAmount, owner, type, who:getUserName()}); refreshAll(); }catch(e){ console.error(e); }
     });
   });
   el.querySelectorAll('.acct-del').forEach(btn=>{
@@ -1048,7 +1058,7 @@ function renderAccounts(){
       if(!confirm('이 계좌를 삭제할까요?')) return;
       const id = btn.closest('[data-id]').dataset.id;
       if(!state.configured) return;
-      try{ await apiPost('deleteAccount', {id}); refreshAll(); }catch(e){ console.error(e); }
+      try{ await apiPost('deleteAccount', {id, who:getUserName()}); refreshAll(); }catch(e){ console.error(e); }
     });
   });
 }
@@ -1100,6 +1110,26 @@ function renderCategories(){
   });
 }
 
+function renderActivityLog(){
+  const el = document.getElementById('activityListArea');
+  if(!el) return;
+  if(!state.activityLog.length){ el.innerHTML = '<div class="empty">아직 활동 기록이 없어요.</div>'; return; }
+  el.innerHTML = `
+    <div style="overflow-x:auto;">
+    <table class="ledger-table">
+      <thead><tr><th>시간</th><th>누가</th><th>내용</th></tr></thead>
+      <tbody>
+        ${state.activityLog.map(l=>{
+          const d = l.time ? new Date(l.time) : null;
+          const timeStr = d && !isNaN(d) ? `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}` : '';
+          return `<tr><td class="small">${esc(timeStr)}</td><td>${esc(l.who||'')}</td><td>${esc(l.detail||l.action||'')}</td></tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>
+  `;
+}
+
 function addCategory(){
   const input = document.getElementById('newCatName');
   const name = input.value.trim();
@@ -1115,7 +1145,7 @@ async function saveCategories(next){
   renderCategories();
   renderTxCatFilter();
   if(state.configured){
-    try{ await apiPost('saveCategories', {categories: next}); }catch(e){ console.error(e); }
+    try{ await apiPost('saveCategories', {categories: next, who:getUserName()}); }catch(e){ console.error(e); }
   }
 }
 </script>
