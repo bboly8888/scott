@@ -151,7 +151,17 @@ select.cat-select{max-width:130px;}
 </style>
 </head>
 <body>
-<div class="app">
+<div id="lockScreen" style="position:fixed; inset:0; background:var(--bg); z-index:999; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px; padding:20px;">
+  <div style="font-size:32px;">📒</div>
+  <h1 style="font-size:20px; color:var(--primary);">우리 가계부</h1>
+  <p class="small" style="margin:0 0 4px;">비밀번호를 입력해주세요</p>
+  <form id="lockForm" style="display:flex; gap:8px;" autocomplete="off">
+    <input type="password" id="lockInput" placeholder="비밀번호" style="width:180px;" autofocus>
+    <button type="submit" class="btn">입장</button>
+  </form>
+  <p class="small" id="lockError" style="color:var(--expense); min-height:16px;"></p>
+</div>
+<div class="app" id="appShell" style="display:none;">
 
   <aside class="sidebar">
     <div class="brand">
@@ -170,6 +180,7 @@ select.cat-select{max-width:130px;}
       <input id="userNameInput" type="text" placeholder="예: 민준">
       <p class="sync-status" id="syncStatus">연결 확인 중…</p>
       <button class="btn ghost btn-sm" id="manualSyncBtn" style="width:100%;">지금 새로고침</button>
+      <button class="btn ghost btn-sm" id="lockAgainBtn" style="width:100%;">화면 잠그기</button>
     </div>
   </aside>
 
@@ -267,6 +278,7 @@ select.cat-select{max-width:130px;}
 const API_URL = 'https://script.google.com/macros/s/AKfycbzuZ34L5m5zlJTYU-_9TFoKr471kYmyHq0mSA79qNOOqtrSW2VGtEuJOJp4rVYdCN0/exec'; // 예: https://script.google.com/macros/s/AKfycb.../exec
 const API_KEY = '083100';      // Code.gs의 SECRET과 반드시 동일해야 함
 const POLL_MS = 15000; // 자동 새로고침 주기 (15초)
+const LOCK_PASSWORD = '083100'; // 앱 잠금 화면 비밀번호 (원하는 값으로 바꾸세요)
 /* ============================================================ */
 
 const DEFAULT_CATEGORIES = [
@@ -325,6 +337,32 @@ function getUserName(){ return document.getElementById('userNameInput').value.tr
 
 /* ---------- 초기화 ---------- */
 document.addEventListener('DOMContentLoaded', ()=>{
+  const unlocked = sessionStorage.getItem('budget_unlocked') === 'yes';
+  if(unlocked){
+    enterApp();
+  }else{
+    document.getElementById('lockInput').focus();
+    document.getElementById('lockForm').addEventListener('submit', e=>{
+      e.preventDefault();
+      const val = document.getElementById('lockInput').value;
+      if(val === LOCK_PASSWORD){
+        sessionStorage.setItem('budget_unlocked','yes');
+        enterApp();
+      }else{
+        document.getElementById('lockError').textContent = '비밀번호가 틀렸어요.';
+        document.getElementById('lockInput').value = '';
+      }
+    });
+  }
+});
+
+function enterApp(){
+  document.getElementById('lockScreen').style.display = 'none';
+  document.getElementById('appShell').style.display = 'flex';
+  startApp();
+}
+
+function startApp(){
   document.querySelectorAll('.nav-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
@@ -352,6 +390,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('addAcctBtn').addEventListener('click', toggleAddAcctForm);
   document.getElementById('addCatBtn').addEventListener('click', addCategory);
   document.getElementById('manualSyncBtn').addEventListener('click', ()=>refreshAll(true));
+  document.getElementById('lockAgainBtn').addEventListener('click', ()=>{
+    sessionStorage.removeItem('budget_unlocked');
+    location.reload();
+  });
 
   if(window.pdfjsLib){
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -360,7 +402,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshAll(); });
 
   initApi();
-});
+}
 
 async function initApi(){
   const statusEl = document.getElementById('syncStatus');
