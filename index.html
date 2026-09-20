@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>우리 가계부</title>
+<title>성우소진 가계부</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1F3D38">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="성소가계부">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -54,7 +62,7 @@
   --expense:#E0938A; --expense-soft:#3A2523; --income:#8FC29E; --income-soft:#213325;
 }
 *{box-sizing:border-box;}
-body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:15px; line-height:1.55;}
+body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:15px; line-height:1.55; word-break:keep-all; overflow-wrap:break-word;}
 h1,h2,h3{font-family:var(--font-head); font-weight:600; margin:0 0 4px;}
 button{font-family:inherit; cursor:pointer;}
 input,select,textarea{font-family:inherit; font-size:14px; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm); padding:8px 10px;}
@@ -86,7 +94,22 @@ main{flex:1; padding:28px 32px 60px; min-width:0;}
 .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md); padding:20px;}
 .grid-2{display:grid; grid-template-columns:1.3fr 1fr; gap:16px;}
 .grid-3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
-@media (max-width:900px){ .app{flex-direction:column;} .sidebar{width:100%; flex-direction:row; align-items:center; padding:14px 18px;} .sidebar-foot{display:none;} nav{flex-direction:row; overflow-x:auto;} .grid-2,.grid-3{grid-template-columns:1fr;} main{padding:20px;} }
+@media (max-width:900px){
+  .app{flex-direction:column;}
+  .sidebar{width:100%; flex-direction:row; align-items:center; padding:12px 14px; overflow-x:auto; gap:14px;}
+  .brand{flex-shrink:0; white-space:nowrap;}
+  .brand h1{white-space:nowrap; font-size:17px;}
+  .brand .tagline{display:none;}
+  .sidebar-foot{display:none;}
+  nav{flex-direction:row; overflow-x:auto; flex-shrink:0;}
+  .nav-btn{white-space:nowrap; flex-shrink:0;}
+  .grid-2,.grid-3{grid-template-columns:1fr;}
+  main{padding:16px;}
+  .ledger-table{min-width:640px;}
+  .ledger-table th, .ledger-table td{white-space:nowrap;}
+  .bar-row span:first-child{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .field-row{flex-wrap:nowrap; overflow-x:auto; padding-bottom:4px;}
+}
 
 .hero-number{font-family:var(--font-head); font-size:40px; color:var(--expense); margin:6px 0 2px;}
 .hero-label{font-size:13px; color:var(--ink-soft);}
@@ -153,7 +176,7 @@ select.cat-select{max-width:130px;}
 <body>
 <div id="lockScreen" style="position:fixed; inset:0; background:var(--bg); z-index:999; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px; padding:20px;">
   <div style="font-size:32px;">📒</div>
-  <h1 style="font-size:20px; color:var(--primary);">우리 가계부</h1>
+  <h1 style="font-size:20px; color:var(--primary);">성우소진가계부</h1>
   <p class="small" style="margin:0 0 4px;">비밀번호를 입력해주세요</p>
   <form id="lockForm" style="display:flex; gap:8px;" autocomplete="off">
     <input type="password" id="lockInput" placeholder="비밀번호" style="width:180px;" autofocus>
@@ -165,7 +188,7 @@ select.cat-select{max-width:130px;}
 
   <aside class="sidebar">
     <div class="brand">
-      <h1>📒 우리 가계부</h1>
+      <h1>📒 성우소진가계부</h1>
       <p class="tagline">함께 쓰는 지출·저축 기록</p>
     </div>
     <nav id="navBar">
@@ -251,6 +274,8 @@ select.cat-select{max-width:130px;}
       <div id="addAcctForm"></div>
       <div id="acctSummary"></div>
       <div id="acctListArea"></div>
+      <div class="section-title">저축 내역</div>
+      <div id="savingsLogArea"></div>
     </section>
 
     <section class="tab" id="tab-categories">
@@ -309,7 +334,7 @@ const DEFAULT_CATEGORIES = [
 
 const state = {
   configured:false,
-  transactions:[], accounts:[], categories:[], activityLog:[],
+  transactions:[], accounts:[], categories:[], activityLog:[], savingsLog:[],
   preview:[],
   uploadContext:null,
   syncing:false,
@@ -341,10 +366,25 @@ async function apiPost(action, payload){
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function pad(n){ return String(n).padStart(2,'0'); }
 function fmtWon(n){ return (Math.round(n||0)).toLocaleString('ko-KR')+'원'; }
+function fmtNum(n){ return Math.round(n||0).toLocaleString('ko-KR'); }
+function parseNum(s){ return Number(String(s==null?'':s).replace(/[^0-9.-]/g,'')) || 0; }
+function attachCommaInput(el){
+  if(!el) return;
+  el.addEventListener('input', ()=>{
+    const num = parseNum(el.value);
+    el.value = num ? fmtNum(num) : '';
+  });
+}
 function todayYM(){ const d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1); }
 function getUserName(){ return document.getElementById('userNameInput').value.trim() || '익명'; }
 
 /* ---------- 초기화 ---------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+
 document.addEventListener('DOMContentLoaded', ()=>{
   const unlocked = sessionStorage.getItem('budget_unlocked') === 'yes';
   if(unlocked){
@@ -442,10 +482,11 @@ async function refreshAll(manual){
     state.accounts = data.accounts||[];
     state.categories = (data.categories && data.categories.length) ? data.categories : DEFAULT_CATEGORIES;
     state.activityLog = (data.activityLog || []).slice().sort((a,b)=> (b.time||'').localeCompare(a.time||''));
+    state.savingsLog = (data.savingsLog || []).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
     if(!data.categories || !data.categories.length){
       apiPost('saveCategories', {categories: DEFAULT_CATEGORIES, who:'시스템'}).catch(()=>{});
     }
-    renderDashboard(); renderTransactions(); renderAccounts(); renderCategories(); renderTxCatFilter(); renderActivityLog();
+    renderDashboard(); renderTransactions(); renderAccounts(); renderCategories(); renderTxCatFilter(); renderActivityLog(); renderSavingsLog();
     const now = new Date();
     statusEl.textContent = `마지막 동기화 ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     statusEl.className = 'sync-status ok';
@@ -639,8 +680,10 @@ function scoreHeaderRow(row){
 }
 
 function showMapping(rows, sourceName){
-  let headerIdx = 0, bestScore = -1;
-  for(let i=0;i<Math.min(15, rows.length); i++){
+  // 헤더 후보를 넉넉하게(최대 60줄) 훑고, 최소 2개 이상 키워드가 매칭된 줄만 진짜 머리글로 인정해요.
+  // (삼성카드처럼 안내문이 위에 여러 줄 있는 파일도 실제 표 머리글까지 건너뛰어 찾기 위함)
+  let headerIdx = 0, bestScore = 1;
+  for(let i=0;i<Math.min(60, rows.length); i++){
     const s = scoreHeaderRow(rows[i]);
     if(s > bestScore){ bestScore = s; headerIdx = i; }
   }
@@ -829,7 +872,7 @@ function showPreview(rows){
               <td><input type="date" class="pv-date" value="${esc(r.date)}" style="width:130px;"></td>
               <td><input type="text" class="pv-desc" value="${esc(r.description)}" style="width:180px;"></td>
               <td><select class="pv-type"><option value="expense" ${r.type==='expense'?'selected':''}>지출</option><option value="income" ${r.type==='income'?'selected':''}>수입</option></select></td>
-              <td><input type="number" class="pv-amount num" value="${Math.round(r.amount)}" style="width:100px;"></td>
+              <td><input type="text" inputmode="numeric" class="pv-amount num" value="${fmtNum(r.amount)}" style="width:100px;"></td>
               <td><select class="pv-cat cat-select">${categoryOptionsHtml(r.category)}</select></td>
               <td><button class="btn ghost btn-sm pv-remove">삭제</button></td>
             </tr>`).join('')}
@@ -846,6 +889,7 @@ function showPreview(rows){
   el.querySelectorAll('.pv-remove').forEach(btn=>{
     btn.addEventListener('click', ()=>{ btn.closest('tr').remove(); updateImportBtnLabel(); });
   });
+  el.querySelectorAll('.pv-amount').forEach(attachCommaInput);
   document.getElementById('cancelPreviewBtn').addEventListener('click', ()=>{ el.innerHTML=''; document.getElementById('mappingArea').innerHTML=''; });
   document.getElementById('importBtn').addEventListener('click', importPreviewRows);
 }
@@ -867,7 +911,7 @@ async function importPreviewRows(){
   const rows = [];
   trs.forEach(tr=>{
     const date = tr.querySelector('.pv-date').value;
-    const amount = Number(tr.querySelector('.pv-amount').value);
+    const amount = parseNum(tr.querySelector('.pv-amount').value);
     if(!date || !amount) return;
     rows.push({
       date, description: tr.querySelector('.pv-desc').value.trim(),
@@ -911,16 +955,17 @@ function toggleAddTxForm(){
         <div class="field"><label>날짜</label><input type="date" id="newTxDate" value="${new Date().toISOString().slice(0,10)}"></div>
         <div class="field"><label>내용</label><input type="text" id="newTxDesc" placeholder="예: 현금 결제"></div>
         <div class="field"><label>구분</label><select id="newTxType"><option value="expense">지출</option><option value="income">수입</option></select></div>
-        <div class="field"><label>금액</label><input type="number" id="newTxAmount" placeholder="0"></div>
+        <div class="field"><label>금액</label><input type="text" inputmode="numeric" id="newTxAmount" placeholder="0"></div>
         <div class="field"><label>카테고리</label><select id="newTxCat">${state.categories.map(c=>`<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}</select></div>
         <button class="btn" id="saveNewTxBtn">저장</button>
       </div>
     </div>
   `;
+  attachCommaInput(document.getElementById('newTxAmount'));
   document.getElementById('saveNewTxBtn').addEventListener('click', async ()=>{
     if(!state.configured){ alert('아직 구글 시트 연결 설정이 안 되어 있어요.'); return; }
     const date = document.getElementById('newTxDate').value;
-    const amount = Number(document.getElementById('newTxAmount').value);
+    const amount = parseNum(document.getElementById('newTxAmount').value);
     if(!date || !amount){ alert('날짜와 금액을 입력해주세요.'); return; }
     const newTx = {
       date, description: document.getElementById('newTxDesc').value.trim(),
@@ -1012,12 +1057,14 @@ function toggleAddAcctForm(){
         <div class="field"><label>계좌 이름</label><input type="text" id="newAcctName" placeholder="예: 삼성증권"></div>
         <div class="field"><label>소유자</label><input type="text" id="newAcctOwner" list="ownerOptions" placeholder="예: 조성우"></div>
         <div class="field"><label>자산유형</label><select id="newAcctType">${assetTypeOptionsHtml('현금')}</select></div>
-        <div class="field"><label>현재 잔액/평가금액</label><input type="number" id="newAcctBalance" placeholder="0"></div>
-        <div class="field"><label>목표 금액 (선택)</label><input type="number" id="newAcctTarget" placeholder="0"></div>
+        <div class="field"><label>현재 잔액/평가금액</label><input type="text" inputmode="numeric" id="newAcctBalance" placeholder="0"></div>
+        <div class="field"><label>목표 금액 (선택)</label><input type="text" inputmode="numeric" id="newAcctTarget" placeholder="0"></div>
         <button class="btn" id="saveNewAcctBtn">저장</button>
       </div>
     </div>
   `;
+  attachCommaInput(document.getElementById('newAcctBalance'));
+  attachCommaInput(document.getElementById('newAcctTarget'));
   document.getElementById('saveNewAcctBtn').addEventListener('click', async ()=>{
     if(!state.configured){ alert('아직 구글 시트 연결 설정이 안 되어 있어요.'); return; }
     const name = document.getElementById('newAcctName').value.trim();
@@ -1025,14 +1072,19 @@ function toggleAddAcctForm(){
     const newAcct = {
       name, owner: document.getElementById('newAcctOwner').value.trim() || '미지정',
       type: document.getElementById('newAcctType').value,
-      balance: Number(document.getElementById('newAcctBalance').value)||0,
-      targetAmount: Number(document.getElementById('newAcctTarget').value)||0,
+      balance: parseNum(document.getElementById('newAcctBalance').value),
+      targetAmount: parseNum(document.getElementById('newAcctTarget').value),
       addedBy:getUserName()
     };
     document.getElementById('addAcctForm').innerHTML = '';
     try{
       const result = await apiPost('addAccount', {...newAcct, who:getUserName()});
-      state.accounts.push({...newAcct, id:(result&&result.id)||('tmp'+Date.now())});
+      const newId = (result&&result.id)||('tmp'+Date.now());
+      state.accounts.push({...newAcct, id:newId});
+      if(newAcct.balance){
+        state.savingsLog.unshift({ date:new Date().toISOString().slice(0,10), accountId:newId, accountName:newAcct.name, delta:newAcct.balance, balanceAfter:newAcct.balance, who:getUserName(), note:'계좌 추가 (최초 잔액)' });
+        renderSavingsLog();
+      }
       renderDashboard(); renderAccounts();
     }catch(e){ console.error(e); alert('저장에 실패했어요.'); }
   });
@@ -1053,8 +1105,8 @@ function renderAccounts(){
         <div style="min-width:120px;"><strong>${esc(a.name)}</strong></div>
         <div class="field"><label>소유자</label><input type="text" class="acct-owner" list="ownerOptions" value="${esc(a.owner||'미지정')}" style="width:100px;"></div>
         <div class="field"><label>자산유형</label><select class="acct-type">${assetTypeOptionsHtml(a.type)}</select></div>
-        <div class="field"><label>잔액/평가금액</label><input type="number" class="acct-balance" value="${Math.round(a.balance||0)}" style="width:130px;"></div>
-        <div class="field"><label>목표금액</label><input type="number" class="acct-target" value="${Math.round(a.targetAmount||0)}" style="width:130px;"></div>
+        <div class="field"><label>잔액/평가금액</label><input type="text" inputmode="numeric" class="acct-balance" value="${fmtNum(a.balance||0)}" style="width:130px;"></div>
+        <div class="field"><label>목표금액</label><input type="text" inputmode="numeric" class="acct-target" value="${fmtNum(a.targetAmount||0)}" style="width:130px;"></div>
         <button class="btn secondary btn-sm acct-save">저장</button>
         <button class="btn danger btn-sm acct-del">삭제</button>
       </div>
@@ -1062,17 +1114,25 @@ function renderAccounts(){
     </div>`;
   }).join('');
 
+  el.querySelectorAll('.acct-balance').forEach(attachCommaInput);
+  el.querySelectorAll('.acct-target').forEach(attachCommaInput);
   el.querySelectorAll('.acct-save').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const card = btn.closest('[data-id]');
       const id = card.dataset.id;
-      const balance = Number(card.querySelector('.acct-balance').value)||0;
-      const targetAmount = Number(card.querySelector('.acct-target').value)||0;
+      const balance = parseNum(card.querySelector('.acct-balance').value);
+      const targetAmount = parseNum(card.querySelector('.acct-target').value);
       const owner = card.querySelector('.acct-owner').value.trim() || '미지정';
       const type = card.querySelector('.acct-type').value;
       if(!state.configured) return;
       const a = state.accounts.find(x=>x.id===id);
+      const oldBalance = a ? Number(a.balance||0) : 0;
       if(a){ a.balance=balance; a.targetAmount=targetAmount; a.owner=owner; a.type=type; }
+      const delta = balance - oldBalance;
+      if(delta !== 0){
+        state.savingsLog.unshift({ date:new Date().toISOString().slice(0,10), accountId:id, accountName:(a&&a.name)||'', delta, balanceAfter:balance, who:getUserName(), note: delta>0?'저축/입금':'인출/감소' });
+        renderSavingsLog();
+      }
       renderDashboard();
       try{ await apiPost('updateAccount', {id, balance, targetAmount, owner, type, who:getUserName()}); }catch(e){ console.error(e); }
     });
@@ -1087,6 +1147,32 @@ function renderAccounts(){
       try{ await apiPost('deleteAccount', {id, who:getUserName()}); }catch(e){ console.error(e); }
     });
   });
+}
+
+function renderSavingsLog(){
+  const el = document.getElementById('savingsLogArea');
+  if(!el) return;
+  if(!state.savingsLog.length){ el.innerHTML = '<div class="empty">아직 저축 내역이 없어요. 계좌 잔액을 늘려서 저장하면 여기 쌓여요.</div>'; return; }
+  el.innerHTML = `
+    <div style="overflow-x:auto;">
+    <table class="ledger-table">
+      <thead><tr><th>날짜</th><th>계좌</th><th>변동액</th><th>변동 후 잔액</th><th>작성자</th></tr></thead>
+      <tbody>
+        ${state.savingsLog.map(l=>{
+          const delta = Number(l.delta||0);
+          const sign = delta>0 ? '+' : '';
+          return `<tr>
+            <td class="small">${esc(l.date||'')}</td>
+            <td>${esc(l.accountName||'')}</td>
+            <td class="num ${delta>=0?'amt-income':'amt-expense'}" style="text-align:right;">${sign}${fmtNum(delta)}원</td>
+            <td class="num" style="text-align:right;">${fmtNum(l.balanceAfter)}원</td>
+            <td class="small">${esc(l.who||'')}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>
+  `;
 }
 
 /* ---------- 카테고리 설정 탭 ---------- */
