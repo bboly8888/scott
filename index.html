@@ -863,28 +863,35 @@ async function importPreviewRows(){
   const btn = document.getElementById('importBtn');
   btn.disabled = true;
   const progressEl = document.getElementById('importProgress');
-  let ok=0, fail=0;
-  for(let i=0;i<trs.length;i++){
-    const tr = trs[i];
+  progressEl.textContent = `저장 중… (${trs.length}건, 최대 몇 초 걸릴 수 있어요)`;
+  const rows = [];
+  trs.forEach(tr=>{
     const date = tr.querySelector('.pv-date').value;
-    const description = tr.querySelector('.pv-desc').value.trim();
-    const type = tr.querySelector('.pv-type').value;
     const amount = Number(tr.querySelector('.pv-amount').value);
-    const category = tr.querySelector('.pv-cat').value;
-    progressEl.textContent = `저장 중… (${i+1}/${trs.length})`;
-    if(!date || !amount){ fail++; continue; }
-    try{
-      await apiPost('addTransaction', { date, description, amount: Math.abs(amount), type, category, addedBy:getUserName(), who:getUserName() });
-      ok++;
-    }catch(e){ console.error(e); fail++; }
-  }
+    if(!date || !amount) return;
+    rows.push({
+      date, description: tr.querySelector('.pv-desc').value.trim(),
+      type: tr.querySelector('.pv-type').value, amount: Math.abs(amount),
+      category: tr.querySelector('.pv-cat').value, addedBy:getUserName()
+    });
+  });
+  let ok=0, fail=0;
+  try{
+    const result = await apiPost('addTransactionsBatch', { rows, who:getUserName() });
+    ok = rows.length;
+    // 낙관적 업데이트: 서버 재조회 없이 바로 화면에 반영
+    const now = new Date().toISOString();
+    const ids = (result && result.ids) || [];
+    rows.forEach((r,i)=>{ state.transactions.unshift({ ...r, id: ids[i]||('tmp'+i), createdAt: now }); });
+    state.transactions.sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''));
+    renderDashboard(); renderTransactions();
+  }catch(e){ console.error(e); fail = rows.length; }
   progressEl.textContent = '';
   btn.disabled = false;
-  alert(`${ok}건 저장했어요.${fail?` (${fail}건 실패)`:''}`);
+  alert(fail ? `저장에 실패했어요. 다시 시도해주세요.` : `${ok}건 저장했어요.`);
   document.getElementById('previewArea').innerHTML = '';
   document.getElementById('mappingArea').innerHTML = '';
   document.getElementById('pasteText').value = '';
-  refreshAll();
 }
 
 /* ---------- 거래 내역 탭 ---------- */
@@ -915,13 +922,18 @@ function toggleAddTxForm(){
     const date = document.getElementById('newTxDate').value;
     const amount = Number(document.getElementById('newTxAmount').value);
     if(!date || !amount){ alert('날짜와 금액을 입력해주세요.'); return; }
-    await apiPost('addTransaction', {
+    const newTx = {
       date, description: document.getElementById('newTxDesc').value.trim(),
       type: document.getElementById('newTxType').value, amount: Math.abs(amount),
-      category: document.getElementById('newTxCat').value, addedBy:getUserName(), who:getUserName()
-    });
+      category: document.getElementById('newTxCat').value, addedBy:getUserName()
+    };
     document.getElementById('addTxForm').innerHTML = '';
-    refreshAll();
+    try{
+      const result = await apiPost('addTransaction', {...newTx, who:getUserName()});
+      state.transactions.unshift({...newTx, id: (result&&result.id)||('tmp'+Date.now()), createdAt:new Date().toISOString()});
+      state.transactions.sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''));
+      renderDashboard(); renderTransactions();
+    }catch(e){ console.error(e); alert('저장에 실패했어요.'); }
   });
 }
 
@@ -959,7 +971,10 @@ function renderTransactions(){
     sel.addEventListener('change', async ()=>{
       const id = sel.closest('tr').dataset.id;
       if(!state.configured) return;
-      try{ await apiPost('updateTransaction', {id, category: sel.value, who:getUserName()}); refreshAll(); }catch(e){ console.error(e); }
+      const t = state.transactions.find(x=>x.id===id);
+      if(t) t.category = sel.value;
+      renderDashboard();
+      try{ await apiPost('updateTransaction', {id, category: sel.value, who:getUserName()}); }catch(e){ console.error(e); }
     });
   });
   el.querySelectorAll('.tx-del').forEach(btn=>{
@@ -967,7 +982,9 @@ function renderTransactions(){
       if(!confirm('이 거래를 삭제할까요?')) return;
       const id = btn.closest('tr').dataset.id;
       if(!state.configured) return;
-      try{ await apiPost('deleteTransaction', {id, who:getUserName()}); refreshAll(); }catch(e){ console.error(e); }
+      state.transactions = state.transactions.filter(x=>x.id!==id);
+      renderDashboard(); renderTransactions();
+      try{ await apiPost('deleteTransaction', {id, who:getUserName()}); }catch(e){ console.error(e); }
     });
   });
 }
@@ -1005,15 +1022,19 @@ function toggleAddAcctForm(){
     if(!state.configured){ alert('아직 구글 시트 연결 설정이 안 되어 있어요.'); return; }
     const name = document.getElementById('newAcctName').value.trim();
     if(!name){ alert('계좌 이름을 입력해주세요.'); return; }
-    await apiPost('addAccount', {
+    const newAcct = {
       name, owner: document.getElementById('newAcctOwner').value.trim() || '미지정',
       type: document.getElementById('newAcctType').value,
       balance: Number(document.getElementById('newAcctBalance').value)||0,
       targetAmount: Number(document.getElementById('newAcctTarget').value)||0,
-      addedBy:getUserName(), who:getUserName()
-    });
+      addedBy:getUserName()
+    };
     document.getElementById('addAcctForm').innerHTML = '';
-    refreshAll();
+    try{
+      const result = await apiPost('addAccount', {...newAcct, who:getUserName()});
+      state.accounts.push({...newAcct, id:(result&&result.id)||('tmp'+Date.now())});
+      renderDashboard(); renderAccounts();
+    }catch(e){ console.error(e); alert('저장에 실패했어요.'); }
   });
 }
 
@@ -1050,7 +1071,10 @@ function renderAccounts(){
       const owner = card.querySelector('.acct-owner').value.trim() || '미지정';
       const type = card.querySelector('.acct-type').value;
       if(!state.configured) return;
-      try{ await apiPost('updateAccount', {id, balance, targetAmount, owner, type, who:getUserName()}); refreshAll(); }catch(e){ console.error(e); }
+      const a = state.accounts.find(x=>x.id===id);
+      if(a){ a.balance=balance; a.targetAmount=targetAmount; a.owner=owner; a.type=type; }
+      renderDashboard();
+      try{ await apiPost('updateAccount', {id, balance, targetAmount, owner, type, who:getUserName()}); }catch(e){ console.error(e); }
     });
   });
   el.querySelectorAll('.acct-del').forEach(btn=>{
@@ -1058,7 +1082,9 @@ function renderAccounts(){
       if(!confirm('이 계좌를 삭제할까요?')) return;
       const id = btn.closest('[data-id]').dataset.id;
       if(!state.configured) return;
-      try{ await apiPost('deleteAccount', {id, who:getUserName()}); refreshAll(); }catch(e){ console.error(e); }
+      state.accounts = state.accounts.filter(x=>x.id!==id);
+      renderDashboard(); renderAccounts();
+      try{ await apiPost('deleteAccount', {id, who:getUserName()}); }catch(e){ console.error(e); }
     });
   });
 }
