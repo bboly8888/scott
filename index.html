@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>성우소진가계부</title>
+<title>성우소진 가계부</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1F3D38">
 <meta name="mobile-web-app-capable" content="yes">
@@ -275,6 +275,7 @@ select.cat-select{max-width:130px;}
         <div class="field"><label>구분</label><select id="txTypeFilter">
           <option value="all">전체</option><option value="expense">지출</option><option value="income">수입</option>
         </select></div>
+        <div class="field"><label>검색</label><input type="text" id="txSearch" placeholder="내용으로 검색"></div>
         <div class="field" style="margin-left:auto;"><button class="btn" id="addTxBtn">+ 직접 추가</button></div>
       </div>
       <div id="addTxForm"></div>
@@ -461,6 +462,7 @@ function startApp(){
   document.getElementById('txMonth').addEventListener('change', renderTransactions);
   document.getElementById('txCatFilter').addEventListener('change', renderTransactions);
   document.getElementById('txTypeFilter').addEventListener('change', renderTransactions);
+  document.getElementById('txSearch').addEventListener('input', renderTransactions);
 
   setupUploadUI();
   document.getElementById('addTxBtn').addEventListener('click', toggleAddTxForm);
@@ -1063,14 +1065,24 @@ function toggleAddTxForm(){
   });
 }
 
+function authorColor(name){
+  const map = {
+    '조성우': {bg:'#E6F1FB', color:'#185FA5'},
+    '김소진': {bg:'#FBEAF0', color:'#993556'},
+  };
+  return map[name] || {bg:'#F1EFE8', color:'#5F5E5A'};
+}
+
 function renderTransactions(){
   renderTxCatFilter();
   const ym = document.getElementById('txMonth').value;
   const catF = document.getElementById('txCatFilter').value;
   const typeF = document.getElementById('txTypeFilter').value;
+  const searchF = document.getElementById('txSearch').value.trim().toLowerCase();
   let list = state.transactions.filter(t=> !ym || (t.date||'').startsWith(ym));
   if(catF && catF!=='all') list = list.filter(t=>(t.category||'미분류')===catF);
   if(typeF && typeF!=='all') list = list.filter(t=>t.type===typeF);
+  if(searchF) list = list.filter(t=> (t.description||'').toLowerCase().includes(searchF) || (t.category||'').toLowerCase().includes(searchF));
 
   const el = document.getElementById('txListArea');
   if(!list.length){ el.innerHTML = '<div class="empty">해당 조건의 거래가 없어요.</div>'; return; }
@@ -1080,15 +1092,18 @@ function renderTransactions(){
     <table class="ledger-table">
       <thead><tr><th>날짜</th><th>내용</th><th>카테고리</th><th>작성자</th><th style="text-align:right;">금액</th><th></th></tr></thead>
       <tbody>
-        ${list.map(t=>`
+        ${list.map(t=>{
+          const ac = authorColor(t.addedBy);
+          return `
           <tr data-id="${t.id}">
             <td class="small">${esc(t.date||'')}</td>
             <td>${esc(t.description||'')}</td>
             <td><select class="cat-select tx-cat-edit">${categoryOptionsHtml(t.category||'미분류')}</select></td>
-            <td class="small">${esc(t.addedBy||'')}</td>
+            <td><span style="background:${ac.bg}; color:${ac.color}; font-size:11.5px; font-weight:500; padding:2px 8px; border-radius:20px;">${esc(t.addedBy||'미상')}</span></td>
             <td class="num ${t.type==='income'?'amt-income':'amt-expense'}" style="text-align:right;">${t.type==='income'?'+':'-'}${fmtWon(t.amount)}</td>
             <td><button class="btn ghost btn-sm tx-del">삭제</button></td>
-          </tr>`).join('')}
+          </tr>`;
+        }).join('')}
       </tbody>
     </table>
     </div>
