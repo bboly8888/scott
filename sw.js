@@ -1,5 +1,8 @@
-const CACHE_NAME = 'budget-app-v1';
-const CORE_ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE_NAME = 'budget-app-v2';
+const CORE_ASSETS = [
+  './', './index.html', './manifest.json', './icon-192.png', './icon-512.png',
+  './vendor/xlsx.full.min.js', './vendor/pdf.min.js', './vendor/pdf.worker.min.js'
+];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -15,8 +18,8 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
-// 같은 사이트(index.html 등)는 네트워크 우선 + 오프라인 시 캐시 사용.
-// 구글 앱스 스크립트 API, CDN 스크립트(xlsx/pdf.js/폰트)는 그대로 네트워크로 통과시켜요.
+// 같은 사이트(index.html, vendor/ 라이브러리 등)는 네트워크 우선 + 오프라인 시 캐시 사용.
+// 구글 앱스 스크립트 API, 구글 폰트는 다른 도메인이라 그대로 네트워크로 통과시켜요.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
