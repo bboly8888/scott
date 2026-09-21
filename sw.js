@@ -1,8 +1,7 @@
-const CACHE_NAME = 'budget-app-v2';
-const CORE_ASSETS = [
-  './', './index.html', './manifest.json', './icon-192.png', './icon-512.png',
-  './vendor/xlsx.full.min.js', './vendor/pdf.min.js', './vendor/pdf.worker.min.js'
-];
+const CACHE_NAME = 'budget-app-v3';
+const CORE_ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
+// xlsx/pdf.js 라이브러리는 이제 별도 파일이 아니라 index.html 안에 직접 담겨있어요
+// (index.html 파일 하나만 다운로드해서 file://로 열어도 항상 동작하게 하기 위함).
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -18,7 +17,7 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
-// 같은 사이트(index.html, vendor/ 라이브러리 등)는 네트워크 우선 + 오프라인 시 캐시 사용.
+// 같은 사이트(index.html 등)는 네트워크 우선 + 오프라인 시 캐시 사용.
 // 구글 앱스 스크립트 API, 구글 폰트는 다른 도메인이라 그대로 네트워크로 통과시켜요.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
