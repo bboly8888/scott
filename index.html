@@ -249,9 +249,9 @@ select.cat-select{max-width:130px;}
         <h3 style="margin-bottom:10px;">파일에서 가져오기</h3>
         <div class="dropzone" id="dropzone">
           <div><strong>클릭해서 파일 선택</strong> 또는 이 영역에 끌어다 놓기</div>
-          <div class="small" style="margin-top:6px;">CSV · Excel(.xlsx, .xls) · PDF 지원</div>
+          <div class="small" style="margin-top:6px;">CSV · Excel(.xlsx, .xls) · PDF · 캡쳐 이미지(.jpg, .png) 지원</div>
         </div>
-        <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.pdf" style="display:none;">
+        <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.pdf,.jpg,.jpeg,.png,.webp" style="display:none;">
       </div>
 
       <div class="card" style="margin-bottom:18px;">
@@ -729,9 +729,47 @@ function handleFile(file){
     parseSpreadsheet(file);
   }else if(ext==='pdf'){
     parsePdf(file);
+  }else if(['jpg','jpeg','png','webp'].includes(ext)){
+    parseImage(file);
   }else{
     document.getElementById('previewArea').innerHTML = '';
-    alert('CSV, Excel(.xlsx/.xls), PDF 파일만 지원해요.');
+    alert('CSV, Excel(.xlsx/.xls), PDF, 캡쳐 이미지(.jpg/.png/.webp) 파일만 지원해요.');
+  }
+}
+
+function loadScriptOnce(src){
+  if(document.querySelector(`script[src="${src}"]`)){
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = ()=>resolve();
+    s.onerror = ()=>reject(new Error('스크립트 로드 실패: '+src));
+    document.head.appendChild(s);
+  });
+}
+
+async function parseImage(file){
+  const el = document.getElementById('previewArea');
+  el.innerHTML = '<div class="empty">이미지에서 글자를 읽는 중이에요… (첫 실행은 시간이 좀 걸릴 수 있어요)</div>';
+  try{
+    if(!window.Tesseract){
+      await loadScriptOnce('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    }
+    const { data: { text } } = await Tesseract.recognize(file, 'kor+eng');
+    const rows = parseTextBlock(text, file.name);
+    document.getElementById('pasteText').value = text;
+    if(!rows.length){
+      el.innerHTML = `
+        <div class="banner warn">이미지에서 거래를 자동으로 찾지 못했어요. 아래 "텍스트로 붙여넣기" 칸에 인식된 글자를 넣어뒀으니, 필요한 부분만 고쳐서 "텍스트에서 내역 추출"을 눌러주세요.</div>`;
+      return;
+    }
+    showPreview(rows);
+  }catch(err){
+    console.error(err);
+    el.innerHTML = `
+      <div class="banner warn">이미지를 읽는 데 실패했어요. 네트워크 상태를 확인하거나, 화질이 좋은 캡쳐로 다시 시도해주세요.</div>`;
   }
 }
 
@@ -915,7 +953,16 @@ function parseLineToTxn(line, sourceName){
   if(!amount) return null;
   const date = normalizeDate(dm[0]);
   if(!date) return null;
-  let desc = line.replace(dm[0],'').replace(best,'').replace(/\b\d{5,}\b/g,' ').replace(/\s+/g,' ').trim();
+  // 가맹점명만 남기고, 카드사 명세서에 흔히 같이 찍히는 시간·카드구분·명의구분·마스킹된 카드번호·
+  // 승인번호·승인/결제 상태 문구는 불필요한 내용이라 걸러낸다.
+  // (정규식 \b는 한글을 단어 문자로 취급하지 않아 한글 토큰엔 안 먹히므로, 공백 기준으로 토큰을 나눠 걸러낸다)
+  const DESC_STOPWORDS = new Set(['신용','체크','본인','가족','승인취소','결제확정','결제완료','승인','취소']);
+  let desc = line.replace(dm[0],'').replace(best,'')
+    .split(/\s+/)
+    .filter(tok=> tok && !DESC_STOPWORDS.has(tok) && !/\*/.test(tok) && !/^\d{1,2}:\d{2}$/.test(tok) && !/^\d{5,}$/.test(tok))
+    .join(' ')
+    .replace(/\(\s*\)/g,' ')  // 값이 비어 내용 없이 남은 괄호
+    .replace(/\s+/g,' ').trim();
   desc = desc.replace(/^[\-:|]+|[\-:|]+$/g,'').trim();
   let type = 'expense';
   const lower = line.toLowerCase();
