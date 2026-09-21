@@ -275,6 +275,7 @@ select.cat-select{max-width:130px;}
         <div class="field"><label>구분</label><select id="txTypeFilter">
           <option value="all">전체</option><option value="expense">지출</option><option value="income">수입</option>
         </select></div>
+        <div class="field"><label>카드구분</label><select id="txCardFilter"><option value="all">전체</option></select></div>
         <div class="field"><label>검색</label><input type="text" id="txSearch" placeholder="내용으로 검색"></div>
         <div class="field" style="margin-left:auto;"><button class="btn" id="addTxBtn">+ 직접 추가</button></div>
       </div>
@@ -462,6 +463,7 @@ function startApp(){
   document.getElementById('txMonth').addEventListener('change', renderTransactions);
   document.getElementById('txCatFilter').addEventListener('change', renderTransactions);
   document.getElementById('txTypeFilter').addEventListener('change', renderTransactions);
+  document.getElementById('txCardFilter').addEventListener('change', renderTransactions);
   document.getElementById('txSearch').addEventListener('input', renderTransactions);
 
   setupUploadUI();
@@ -734,7 +736,8 @@ const HEADER_HINTS = {
   date: ['날짜','이용일','거래일','승인일','일시','이용일자','승인일자'],
   amount: ['금액','이용금액','승인금액','출금액','거래금액','결제금액'],
   desc: ['가맹점','내용','적요','이용가맹점','거래내용','상호','가맹점명'],
-  type: ['구분','거래구분','입출금','유형']
+  type: ['구분','거래구분','입출금','유형'],
+  installment: ['이용구분','매출']
 };
 
 function parseSpreadsheet(file){
@@ -782,7 +785,7 @@ function showMapping(rows, sourceName){
     }
     return -1;
   }
-  const guesses = { date:guess('date'), amount:guess('amount'), desc:guess('desc'), type:guess('type') };
+  const guesses = { date:guess('date'), amount:guess('amount'), desc:guess('desc'), type:guess('type'), installment:guess('installment') };
 
   const opts = (selected)=> headers.map((h,i)=>`<option value="${i}" ${i===selected?'selected':''}>${esc(h||('컬럼 '+(i+1)))}</option>`).join('') + `<option value="-1" ${selected===-1?'selected':''}>(없음)</option>`;
 
@@ -795,7 +798,10 @@ function showMapping(rows, sourceName){
         <div class="field"><label>내용/가맹점</label><select id="mapDesc">${opts(guesses.desc)}</select></div>
         <div class="field"><label>금액</label><select id="mapAmount">${opts(guesses.amount)}</select></div>
         <div class="field"><label>입출금 구분 (선택)</label><select id="mapType">${opts(guesses.type)}</select></div>
+        <div class="field"><label>일시불·할부 (선택)</label><select id="mapInstallment">${opts(guesses.installment)}</select></div>
+        <div class="field"><label>카드구분</label><select id="mapCard">${cardOptionsHtml(guessCardCompany(sourceName))}</select></div>
       </div>
+      <p class="small" style="margin-top:0;">할부 개월수가 표시되는 카드사(예: 신한카드)는 자동으로 나눠서 기록하고, 개월수가 없는 경우(예: 삼성카드)는 미리보기에서 직접 개월수를 입력해 나눌 수 있어요.</p>
       <button class="btn" id="buildPreviewBtn">미리보기 만들기</button>
     </div>
   `;
@@ -838,6 +844,8 @@ function buildPreviewFromMapping(){
   const descIdx = Number(document.getElementById('mapDesc').value);
   const amountIdx = Number(document.getElementById('mapAmount').value);
   const typeIdx = Number(document.getElementById('mapType').value);
+  const instIdx = Number(document.getElementById('mapInstallment').value);
+  const cardType = document.getElementById('mapCard').value;
   if(dateIdx<0 || amountIdx<0){ alert('날짜와 금액 열은 반드시 선택해야 해요.'); return; }
 
   const rows = [];
@@ -855,10 +863,32 @@ function buildPreviewFromMapping(){
         if(tval.includes('입금') || tval.includes('수입') || tval.includes('환불') || tval.includes('적립') || tval.includes('이자')) type = 'income';
       }
     }
-    rows.push({
-      date, description: descIdx>=0 ? r[descIdx] : '', amount: Math.abs(amountRaw), type,
-      category: matchCategory(descIdx>=0 ? r[descIdx] : ''), source: ctx.sourceName
-    });
+    const desc = descIdx>=0 ? r[descIdx] : '';
+    const baseRow = {
+      date, description: desc, amount: Math.abs(amountRaw), type,
+      category: matchCategory(desc), source: ctx.sourceName, cardType
+    };
+
+    // "일시불·할부" 열 값에 할부 개월수가 있으면(예: 신한카드 "할부 개월(3)") 자동으로 나눠서 기록하고,
+    // 개월수를 알 수 없으면(예: 삼성카드 "할부") 표시만 해두고 미리보기에서 직접 나눌 수 있게 한다.
+    let instMonths = null, isInstallment = false;
+    if(instIdx>=0){
+      const ival = String(r[instIdx]||'');
+      if(ival.includes('할부')){
+        isInstallment = true;
+        const m = ival.match(/(\d+)/);
+        if(m) instMonths = Number(m[1]);
+      }
+    }
+    if(isInstallment && instMonths > 1){
+      rows.push(...splitIntoInstallments(baseRow, instMonths));
+      return;
+    }
+    if(isInstallment){
+      rows.push({ ...baseRow, description: `${desc} (할부·개월수 확인필요)`, installmentUnknown: true });
+      return;
+    }
+    rows.push(baseRow);
   });
   if(!rows.length){ document.getElementById('previewArea').innerHTML = '<div class="banner warn">인식된 거래가 없어요. 열 매칭을 다시 확인해주세요.</div>'; return; }
   showPreview(rows);
@@ -868,16 +898,18 @@ function parseLineToTxn(line, sourceName){
   const dateRe = /(\d{4}[.\-\/]\d{1,2}[.\-\/]\d{1,2}|\d{2}[.\-\/]\d{1,2}[.\-\/]\d{1,2}|\d{1,2}[.\-\/]\d{1,2})/;
   const dm = line.match(dateRe);
   if(!dm) return null;
-  const amtRe = /-?[\d]{1,3}(,\d{3})+|-?\d{4,}/g;
-  const amounts = line.match(amtRe);
+  // 콤마가 찍힌 숫자(진짜 금액, 예: 34,350)를 승인번호처럼 콤마 없는 큰 숫자보다 우선한다.
+  // (승인번호가 실제 금액보다 자릿수가 많아서 "가장 큰 숫자"를 고르면 승인번호가 잘못 뽑히는 문제가 있었음)
+  const commaAmounts = line.match(/-?\d{1,3}(?:,\d{3})+/g);
+  const plainAmounts = line.match(/-?\d{4,}/g);
+  const amounts = (commaAmounts && commaAmounts.length) ? commaAmounts : plainAmounts;
   if(!amounts || !amounts.length) return null;
-  let best = amounts[0];
-  amounts.forEach(a=>{ if(Math.abs(normalizeAmount(a)) > Math.abs(normalizeAmount(best))) best = a; });
+  const best = amounts[amounts.length-1];
   const amount = normalizeAmount(best);
   if(!amount) return null;
   const date = normalizeDate(dm[0]);
   if(!date) return null;
-  let desc = line.replace(dm[0],'').replace(best,'').replace(/\s+/g,' ').trim();
+  let desc = line.replace(dm[0],'').replace(best,'').replace(/\b\d{5,}\b/g,' ').replace(/\s+/g,' ').trim();
   desc = desc.replace(/^[\-:|]+|[\-:|]+$/g,'').trim();
   let type = 'expense';
   const lower = line.toLowerCase();
@@ -918,7 +950,7 @@ async function parsePdf(file){
       const content = await page.getTextContent();
       allLines = allLines.concat(extractPdfLines(content.items));
     }
-    const rows = [];
+    let rows = [];
     allLines.forEach(line=>{ const t = parseLineToTxn(line, file.name); if(t) rows.push(t); });
     if(!rows.length){
       document.getElementById('previewArea').innerHTML = `
@@ -926,6 +958,31 @@ async function parsePdf(file){
       document.getElementById('pasteText').value = allLines.join('\n');
       return;
     }
+
+    const cardType = guessCardCompany(file.name);
+    rows.forEach(r=>{ r.cardType = cardType; });
+
+    // 신한카드 PDF처럼 "이용구분(일시불/할부)"이 거래 내역과 별도 컬럼(다른 페이지)으로 나뉘어 나오는 경우,
+    // 줄 개수가 정확히 일치할 때만 순서대로 조심스럽게 매칭한다 — 안 맞으면 절대 억지로 매칭하지 않는다.
+    const installmentLines = allLines.filter(l => /^(일시불|할부)/.test(l));
+    if(installmentLines.length === rows.length){
+      const expanded = [];
+      rows.forEach((r,i)=>{
+        const l = installmentLines[i];
+        if(/할부/.test(l)){
+          const m = l.match(/(\d+)/);
+          if(m && Number(m[1]) > 1){
+            expanded.push(...splitIntoInstallments(r, Number(m[1])));
+            return;
+          }
+          r.description = `${r.description} (할부·개월수 확인필요)`;
+          r.installmentUnknown = true;
+        }
+        expanded.push(r);
+      });
+      rows = expanded;
+    }
+
     showPreview(rows);
   }catch(err){
     console.error(err);
@@ -939,27 +996,38 @@ function categoryOptionsHtml(selected){
     + (state.categories.some(c=>c.name===selected) ? '' : `<option value="${esc(selected)}" selected>${esc(selected)}</option>`);
 }
 
+function previewRowHtml(r){
+  const splitControls = r.installmentUnknown ? `
+        <div style="display:flex; gap:4px; align-items:center; margin-top:4px;">
+          <input type="number" class="pv-split-months" min="2" max="36" value="2" style="width:52px;" title="개월수">
+          <button class="btn ghost btn-sm pv-split-btn" type="button">나누기</button>
+        </div>` : '';
+  return `
+    <tr>
+      <td><input type="date" class="pv-date" value="${esc(r.date)}" style="width:130px;"></td>
+      <td>
+        <input type="text" class="pv-desc" value="${esc(r.description)}" style="width:180px;">
+        ${splitControls}
+      </td>
+      <td><select class="pv-type"><option value="expense" ${r.type==='expense'?'selected':''}>지출</option><option value="income" ${r.type==='income'?'selected':''}>수입</option></select></td>
+      <td><input type="text" inputmode="numeric" class="pv-amount num" value="${fmtNum(r.amount)}" style="width:100px;"></td>
+      <td><select class="pv-cat cat-select">${categoryOptionsHtml(r.category)}</select></td>
+      <td><select class="pv-card">${cardOptionsHtml(r.cardType||'')}</select></td>
+      <td><button class="btn ghost btn-sm pv-remove" type="button">삭제</button></td>
+    </tr>`;
+}
+
 function showPreview(rows){
   state.preview = rows;
   const el = document.getElementById('previewArea');
   el.innerHTML = `
     <div class="card">
       <h3 style="margin-bottom:6px;">가져올 내역 미리보기 (${rows.length}건)</h3>
-      <p class="small" style="margin-top:0;">저장 전에 내용을 확인하고 필요한 부분을 고쳐주세요.</p>
+      <p class="small" style="margin-top:0;">저장 전에 내용을 확인하고 필요한 부분을 고쳐주세요. 개월수를 모르는 할부 항목은 내용 칸 아래에 개월수를 입력하고 "나누기"를 누르면 매달로 나눠져요.</p>
       <div style="overflow-x:auto;">
       <table class="ledger-table" id="previewTable">
-        <thead><tr><th>날짜</th><th>내용</th><th>구분</th><th>금액</th><th>카테고리</th><th></th></tr></thead>
-        <tbody>
-          ${rows.map((r,i)=>`
-            <tr data-idx="${i}">
-              <td><input type="date" class="pv-date" value="${esc(r.date)}" style="width:130px;"></td>
-              <td><input type="text" class="pv-desc" value="${esc(r.description)}" style="width:180px;"></td>
-              <td><select class="pv-type"><option value="expense" ${r.type==='expense'?'selected':''}>지출</option><option value="income" ${r.type==='income'?'selected':''}>수입</option></select></td>
-              <td><input type="text" inputmode="numeric" class="pv-amount num" value="${fmtNum(r.amount)}" style="width:100px;"></td>
-              <td><select class="pv-cat cat-select">${categoryOptionsHtml(r.category)}</select></td>
-              <td><button class="btn ghost btn-sm pv-remove">삭제</button></td>
-            </tr>`).join('')}
-        </tbody>
+        <thead><tr><th>날짜</th><th>내용</th><th>구분</th><th>금액</th><th>카테고리</th><th>카드</th><th></th></tr></thead>
+        <tbody>${rows.map(r=>previewRowHtml(r)).join('')}</tbody>
       </table>
       </div>
       <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
@@ -969,10 +1037,33 @@ function showPreview(rows){
       </div>
     </div>
   `;
-  el.querySelectorAll('.pv-remove').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ btn.closest('tr').remove(); updateImportBtnLabel(); });
+  const tbody = el.querySelector('#previewTable tbody');
+  tbody.addEventListener('input', e=>{
+    if(e.target.classList.contains('pv-amount')){
+      const num = parseNum(e.target.value);
+      e.target.value = num ? fmtNum(num) : '';
+    }
   });
-  el.querySelectorAll('.pv-amount').forEach(attachCommaInput);
+  tbody.addEventListener('click', e=>{
+    if(e.target.classList.contains('pv-remove')){
+      e.target.closest('tr').remove();
+      updateImportBtnLabel();
+    }else if(e.target.classList.contains('pv-split-btn')){
+      const tr = e.target.closest('tr');
+      const months = Math.max(2, Math.min(36, parseInt(tr.querySelector('.pv-split-months').value,10)||2));
+      const date = tr.querySelector('.pv-date').value;
+      const amount = parseNum(tr.querySelector('.pv-amount').value);
+      if(!date || !amount){ alert('날짜와 금액을 확인해주세요.'); return; }
+      const desc = tr.querySelector('.pv-desc').value.trim().replace(/\s*\(할부·개월수 확인필요\)\s*$/,'');
+      const type = tr.querySelector('.pv-type').value;
+      const category = tr.querySelector('.pv-cat').value;
+      const cardType = tr.querySelector('.pv-card').value;
+      const split = splitIntoInstallments({date, description:desc, type, amount, category, cardType}, months);
+      tr.insertAdjacentHTML('afterend', split.map(r=>previewRowHtml(r)).join(''));
+      tr.remove();
+      updateImportBtnLabel();
+    }
+  });
   document.getElementById('cancelPreviewBtn').addEventListener('click', ()=>{ el.innerHTML=''; document.getElementById('mappingArea').innerHTML=''; });
   document.getElementById('importBtn').addEventListener('click', importPreviewRows);
 }
@@ -999,7 +1090,7 @@ async function importPreviewRows(){
     rows.push({
       date, description: tr.querySelector('.pv-desc').value.trim(),
       type: tr.querySelector('.pv-type').value, amount: Math.abs(amount),
-      category: tr.querySelector('.pv-cat').value, addedBy:getUserName()
+      category: tr.querySelector('.pv-cat').value, cardType: tr.querySelector('.pv-card').value, addedBy:getUserName()
     });
   });
   let ok=0, fail=0;
@@ -1029,6 +1120,15 @@ function renderTxCatFilter(){
   if(current) sel.value = current;
 }
 
+function renderTxCardFilter(){
+  const sel = document.getElementById('txCardFilter');
+  const current = sel.value;
+  const used = Array.from(new Set(state.transactions.map(t=>t.cardType).filter(Boolean)));
+  const names = Array.from(new Set([...CARD_COMPANIES.filter(c=>used.includes(c)), ...used]));
+  sel.innerHTML = '<option value="all">전체</option>' + names.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('') + '<option value="__none__">미지정</option>';
+  if(current) sel.value = current;
+}
+
 function addMonthsClamped(dateStr, n){
   const [y,m,d] = dateStr.split('-').map(Number);
   const idx = (m-1) + n;
@@ -1036,6 +1136,45 @@ function addMonthsClamped(dateStr, n){
   const targetMonth = ((idx%12)+12)%12;
   const daysInTargetMonth = new Date(targetYear, targetMonth+1, 0).getDate();
   return `${targetYear}-${pad(targetMonth+1)}-${pad(Math.min(d, daysInTargetMonth))}`;
+}
+
+const CARD_COMPANIES = ['신한카드','삼성카드','KB국민카드','현대카드','롯데카드','우리카드','하나카드','NH농협카드','현금·기타'];
+
+function guessCardCompany(name){
+  const s = (name||'').toLowerCase();
+  if(s.includes('shinhan') || s.includes('신한')) return '신한카드';
+  if(s.includes('samsung') || s.includes('삼성')) return '삼성카드';
+  if(s.includes('kb') || s.includes('국민')) return 'KB국민카드';
+  if(s.includes('hyundai') || s.includes('현대')) return '현대카드';
+  if(s.includes('lotte') || s.includes('롯데')) return '롯데카드';
+  if(s.includes('woori') || s.includes('우리')) return '우리카드';
+  if(s.includes('hana') || s.includes('하나')) return '하나카드';
+  if(s.includes('nh') || s.includes('농협')) return 'NH농협카드';
+  return '';
+}
+
+function cardOptionsHtml(selected){
+  return '<option value="">(선택 안 함)</option>' + CARD_COMPANIES.map(c=>`<option value="${esc(c)}" ${c===selected?'selected':''}>${esc(c)}</option>`).join('')
+    + (selected && !CARD_COMPANIES.includes(selected) ? `<option value="${esc(selected)}" selected>${esc(selected)}</option>` : '');
+}
+
+// 총액을 개월수만큼 균등 분할(나머지는 앞 회차에 배분)하고, 매달 같은 날짜(말일 보정)로 거래를 나눈다.
+function splitIntoInstallments(row, months){
+  const amount = Math.abs(Number(row.amount)||0);
+  const base = Math.floor(amount/months);
+  const remainder = amount - base*months;
+  const baseDesc = row.description || '할부결제';
+  const rows = [];
+  for(let i=0;i<months;i++){
+    const instAmount = base + (i < remainder ? 1 : 0);
+    rows.push({
+      ...row,
+      date: addMonthsClamped(row.date, i),
+      description: `${baseDesc} (${i+1}/${months}회차·총 ${fmtWon(amount)})`,
+      amount: instAmount,
+    });
+  }
+  return rows;
 }
 
 function toggleAddTxForm(){
@@ -1049,6 +1188,7 @@ function toggleAddTxForm(){
         <div class="field"><label>구분</label><select id="newTxType"><option value="expense">지출</option><option value="income">수입</option></select></div>
         <div class="field"><label>금액</label><input type="text" inputmode="numeric" id="newTxAmount" placeholder="0"></div>
         <div class="field"><label>카테고리</label><select id="newTxCat">${state.categories.map(c=>`<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>카드구분</label><select id="newTxCard">${cardOptionsHtml('')}</select></div>
         <div class="field" style="justify-content:flex-end;">
           <label style="display:flex; align-items:center; gap:6px; font-weight:500;"><input type="checkbox" id="newTxInstallment" style="width:auto;"> 할부</label>
         </div>
@@ -1069,25 +1209,12 @@ function toggleAddTxForm(){
     const desc = document.getElementById('newTxDesc').value.trim();
     const type = document.getElementById('newTxType').value;
     const category = document.getElementById('newTxCat').value;
+    const cardType = document.getElementById('newTxCard').value;
     const isInstallment = document.getElementById('newTxInstallment').checked;
     const months = isInstallment ? Math.max(2, Math.min(36, parseInt(document.getElementById('newTxMonths').value,10) || 2)) : 1;
 
-    let rows;
-    if(months > 1){
-      const base = Math.floor(amount/months);
-      const remainder = amount - base*months;
-      rows = [];
-      for(let i=0;i<months;i++){
-        const instAmount = base + (i < remainder ? 1 : 0);
-        rows.push({
-          date: addMonthsClamped(date, i),
-          description: `${desc || '할부결제'} (${i+1}/${months}회차·총 ${fmtWon(amount)})`,
-          type, amount: instAmount, category, addedBy: getUserName()
-        });
-      }
-    }else{
-      rows = [{ date, description: desc, type, amount, category, addedBy: getUserName() }];
-    }
+    const baseRow = { date, description: desc, type, amount, category, cardType, addedBy: getUserName() };
+    const rows = months > 1 ? splitIntoInstallments(baseRow, months) : [baseRow];
 
     document.getElementById('addTxForm').innerHTML = '';
     try{
@@ -1111,13 +1238,16 @@ function authorColor(name){
 
 function renderTransactions(){
   renderTxCatFilter();
+  renderTxCardFilter();
   const ym = document.getElementById('txMonth').value;
   const catF = document.getElementById('txCatFilter').value;
   const typeF = document.getElementById('txTypeFilter').value;
+  const cardF = document.getElementById('txCardFilter').value;
   const searchF = document.getElementById('txSearch').value.trim().toLowerCase();
   let list = state.transactions.filter(t=> !ym || (t.date||'').startsWith(ym));
   if(catF && catF!=='all') list = list.filter(t=>(t.category||'미분류')===catF);
   if(typeF && typeF!=='all') list = list.filter(t=>t.type===typeF);
+  if(cardF && cardF!=='all') list = list.filter(t=> cardF==='__none__' ? !t.cardType : t.cardType===cardF);
   if(searchF) list = list.filter(t=> (t.description||'').toLowerCase().includes(searchF) || (t.category||'').toLowerCase().includes(searchF));
 
   const el = document.getElementById('txListArea');
@@ -1126,7 +1256,7 @@ function renderTransactions(){
   el.innerHTML = `
     <div style="overflow-x:auto;">
     <table class="ledger-table">
-      <thead><tr><th>날짜</th><th>내용</th><th>카테고리</th><th>작성자</th><th style="text-align:right;">금액</th><th></th></tr></thead>
+      <thead><tr><th>날짜</th><th>내용</th><th>카테고리</th><th>카드</th><th>작성자</th><th style="text-align:right;">금액</th><th></th></tr></thead>
       <tbody>
         ${list.map(t=>{
           const ac = authorColor(t.addedBy);
@@ -1135,6 +1265,7 @@ function renderTransactions(){
             <td class="small">${esc(t.date||'')}</td>
             <td>${esc(t.description||'')}</td>
             <td><select class="cat-select tx-cat-edit">${categoryOptionsHtml(t.category||'미분류')}</select></td>
+            <td class="small">${esc(t.cardType||'-')}</td>
             <td><span style="background:${ac.bg}; color:${ac.color}; font-size:11.5px; font-weight:500; padding:2px 8px; border-radius:20px;">${esc(t.addedBy||'미상')}</span></td>
             <td class="num ${t.type==='income'?'amt-income':'amt-expense'}" style="text-align:right;">${t.type==='income'?'+':'-'}${fmtWon(t.amount)}</td>
             <td><button class="btn ghost btn-sm tx-del">삭제</button></td>
