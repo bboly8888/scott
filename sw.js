@@ -1,4 +1,4 @@
-const CACHE_NAME = 'budget-app-v3';
+const CACHE_NAME = 'budget-app-v4';
 const CORE_ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 // xlsx/pdf.js 라이브러리는 이제 별도 파일이 아니라 index.html 안에 직접 담겨있어요
 // (index.html 파일 하나만 다운로드해서 file://로 열어도 항상 동작하게 하기 위함).
