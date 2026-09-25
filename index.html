@@ -302,11 +302,29 @@ select.cat-select{max-width:130px;}
       </div>
 
       <div class="card" style="margin-bottom:18px;">
-        <h3 style="margin-bottom:10px;">텍스트로 붙여넣기</h3>
-        <p class="small" style="margin-top:0;">카드사 앱이나 문자에서 복사한 내역을 그대로 붙여넣어도 괜찮아요. (날짜와 금액이 포함된 줄을 자동으로 찾아요)</p>
-        <textarea id="pasteText" rows="6" style="width:100%;" placeholder="예) 2025-05-03 스타벅스 강남점 4,500원&#10;2025-05-04 GS25 편의점 12,300원"></textarea>
-        <div style="margin-top:10px;"><button class="btn secondary" id="parseTextBtn">텍스트에서 내역 추출</button></div>
+        <h3 style="margin-bottom:6px;">빠른 입력</h3>
+        <p class="small" style="margin-top:0;">파일 없이 날짜·내용·금액만 바로 입력해서 저장할 수 있어요.</p>
+        <div style="overflow-x:auto;">
+        <table class="ledger-table" id="quickEntryTable">
+          <thead><tr><th>날짜</th><th>내용</th><th>구분</th><th>금액</th><th>카테고리</th><th>카드</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        </div>
+        <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
+          <button class="btn ghost btn-sm" id="quickAddRowBtn" type="button">+ 줄 추가</button>
+          <button class="btn" id="quickSaveBtn">저장</button>
+          <span class="small" id="quickEntryProgress"></span>
+        </div>
       </div>
+
+      <div id="recurringArea"></div>
+
+      <details class="card" style="margin-bottom:18px;">
+        <summary style="cursor:pointer; font-weight:600;">텍스트로 붙여넣기 (고급)</summary>
+        <p class="small" style="margin:10px 0 0;">카드사 앱이나 문자에서 복사한 내역을 그대로 붙여넣어도 괜찮아요. (날짜와 금액이 포함된 줄을 자동으로 찾아요) PDF·이미지에서 자동 인식이 안 됐을 때도 여기서 확인·수정할 수 있어요.</p>
+        <textarea id="pasteText" rows="6" style="width:100%; margin-top:10px;" placeholder="예) 2025-05-03 스타벅스 강남점 4,500원&#10;2025-05-04 GS25 편의점 12,300원"></textarea>
+        <div style="margin-top:10px;"><button class="btn secondary" id="parseTextBtn">텍스트에서 내역 추출</button></div>
+      </details>
 
       <div id="mappingArea"></div>
       <div id="previewArea"></div>
@@ -379,7 +397,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbzuZ34L5m5zlJTYU-_9TFoK
 const API_KEY = '083100';      // Code.gs의 SECRET과 반드시 동일해야 함
 const POLL_MS = 15000; // 자동 새로고침 주기 (15초)
 const LOCK_PASSWORD = '083100'; // 앱 잠금 화면 비밀번호 (원하는 값으로 바꾸세요)
-const APP_VERSION = 'v3'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
+const APP_VERSION = 'v4'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
 /* ============================================================ */
 
 const DEFAULT_CATEGORIES = [
@@ -401,10 +419,11 @@ const DEFAULT_CATEGORIES = [
 
 const state = {
   configured:false,
-  transactions:[], accounts:[], categories:[], activityLog:[], savingsLog:[],
+  transactions:[], accounts:[], categories:[], activityLog:[], savingsLog:[], recurringItems:[],
   preview:[],
   uploadContext:null,
   syncing:false,
+  generatingRecurring:false,
 };
 
 /* ---------- API 통신 ---------- */
@@ -570,10 +589,13 @@ async function refreshAll(manual){
     state.categories = (data.categories && data.categories.length) ? data.categories : DEFAULT_CATEGORIES;
     state.activityLog = (data.activityLog || []).slice().sort((a,b)=> (b.time||'').localeCompare(a.time||''));
     state.savingsLog = (data.savingsLog || []).slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    state.recurringItems = data.recurringItems || [];
     if(!data.categories || !data.categories.length){
       apiPost('saveCategories', {categories: DEFAULT_CATEGORIES, who:'시스템'}).catch(()=>{});
     }
+    await generateDueRecurringItems();
     renderDashboard(); renderTransactions(); renderAccounts(); renderCategories(); renderTxCatFilter(); renderActivityLog(); renderSavingsLog();
+    renderQuickEntry(); renderRecurringSection();
     const now = new Date();
     statusEl.textContent = `마지막 동기화 ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     statusEl.className = 'sync-status ok';
@@ -771,6 +793,8 @@ function setupUploadUI(){
     const rows = parseTextBlock(text, '직접 붙여넣기');
     showPreview(rows);
   });
+  renderQuickEntry();
+  renderRecurringSection();
 }
 
 function handleFile(file){
@@ -1115,11 +1139,42 @@ function previewRowHtml(r){
         ${splitControls}
       </td>
       <td><select class="pv-type"><option value="expense" ${r.type==='expense'?'selected':''}>지출</option><option value="income" ${r.type==='income'?'selected':''}>수입</option></select></td>
-      <td><input type="text" inputmode="numeric" class="pv-amount num" value="${fmtNum(r.amount)}" style="width:100px;"></td>
+      <td><input type="text" inputmode="numeric" class="pv-amount num" value="${r.amount?fmtNum(r.amount):''}" style="width:100px;"></td>
       <td><select class="pv-cat cat-select">${categoryOptionsHtml(r.category)}</select></td>
       <td><select class="pv-card">${cardOptionsHtml(r.cardType||'')}</select></td>
       <td><button class="btn ghost btn-sm pv-remove" type="button">삭제</button></td>
     </tr>`;
+}
+
+// pv-* 행이 있는 테이블 tbody에 공통으로 쓰는 이벤트(금액 콤마 포맷, 삭제, 할부 나누기)를 달아준다.
+// showPreview(가져오기 미리보기)와 빠른 입력 표에서 같이 쓴다.
+function wirePreviewTbody(tbody, onChange){
+  tbody.addEventListener('input', e=>{
+    if(e.target.classList.contains('pv-amount')){
+      const num = parseNum(e.target.value);
+      e.target.value = num ? fmtNum(num) : '';
+    }
+  });
+  tbody.addEventListener('click', e=>{
+    if(e.target.classList.contains('pv-remove')){
+      e.target.closest('tr').remove();
+      if(onChange) onChange();
+    }else if(e.target.classList.contains('pv-split-btn')){
+      const tr = e.target.closest('tr');
+      const months = Math.max(2, Math.min(36, parseInt(tr.querySelector('.pv-split-months').value,10)||2));
+      const date = tr.querySelector('.pv-date').value;
+      const amount = parseNum(tr.querySelector('.pv-amount').value);
+      if(!date || !amount){ alert('날짜와 금액을 확인해주세요.'); return; }
+      const desc = tr.querySelector('.pv-desc').value.trim().replace(/\s*\(할부·개월수 확인필요\)\s*$/,'');
+      const type = tr.querySelector('.pv-type').value;
+      const category = tr.querySelector('.pv-cat').value;
+      const cardType = tr.querySelector('.pv-card').value;
+      const split = splitIntoInstallments({date, description:desc, type, amount, category, cardType}, months);
+      tr.insertAdjacentHTML('afterend', split.map(r=>previewRowHtml(r)).join(''));
+      tr.remove();
+      if(onChange) onChange();
+    }
+  });
 }
 
 function showPreview(rows){
@@ -1143,32 +1198,7 @@ function showPreview(rows){
     </div>
   `;
   const tbody = el.querySelector('#previewTable tbody');
-  tbody.addEventListener('input', e=>{
-    if(e.target.classList.contains('pv-amount')){
-      const num = parseNum(e.target.value);
-      e.target.value = num ? fmtNum(num) : '';
-    }
-  });
-  tbody.addEventListener('click', e=>{
-    if(e.target.classList.contains('pv-remove')){
-      e.target.closest('tr').remove();
-      updateImportBtnLabel();
-    }else if(e.target.classList.contains('pv-split-btn')){
-      const tr = e.target.closest('tr');
-      const months = Math.max(2, Math.min(36, parseInt(tr.querySelector('.pv-split-months').value,10)||2));
-      const date = tr.querySelector('.pv-date').value;
-      const amount = parseNum(tr.querySelector('.pv-amount').value);
-      if(!date || !amount){ alert('날짜와 금액을 확인해주세요.'); return; }
-      const desc = tr.querySelector('.pv-desc').value.trim().replace(/\s*\(할부·개월수 확인필요\)\s*$/,'');
-      const type = tr.querySelector('.pv-type').value;
-      const category = tr.querySelector('.pv-cat').value;
-      const cardType = tr.querySelector('.pv-card').value;
-      const split = splitIntoInstallments({date, description:desc, type, amount, category, cardType}, months);
-      tr.insertAdjacentHTML('afterend', split.map(r=>previewRowHtml(r)).join(''));
-      tr.remove();
-      updateImportBtnLabel();
-    }
-  });
+  wirePreviewTbody(tbody, updateImportBtnLabel);
   document.getElementById('cancelPreviewBtn').addEventListener('click', ()=>{ el.innerHTML=''; document.getElementById('mappingArea').innerHTML=''; });
   document.getElementById('importBtn').addEventListener('click', importPreviewRows);
 }
@@ -1215,6 +1245,202 @@ async function importPreviewRows(){
   document.getElementById('previewArea').innerHTML = '';
   document.getElementById('mappingArea').innerHTML = '';
   document.getElementById('pasteText').value = '';
+}
+
+/* ---------- 빠른 입력(표) ---------- */
+function blankQuickRow(){
+  const defaultCat = (state.categories && state.categories[0] && state.categories[0].name) || '미분류';
+  return { date: new Date().toISOString().slice(0,10), description:'', type:'expense', amount:0, category:defaultCat, cardType:'' };
+}
+
+function renderQuickEntry(){
+  const table = document.getElementById('quickEntryTable');
+  if(!table) return;
+  const tbody = table.querySelector('tbody');
+  tbody.innerHTML = Array.from({length:3}).map(()=>previewRowHtml(blankQuickRow())).join('');
+  wirePreviewTbody(tbody, null);
+  document.getElementById('quickAddRowBtn').addEventListener('click', ()=>{
+    tbody.insertAdjacentHTML('beforeend', previewRowHtml(blankQuickRow()));
+  });
+  document.getElementById('quickSaveBtn').addEventListener('click', saveQuickEntryRows);
+}
+
+async function saveQuickEntryRows(){
+  if(!state.configured){ alert('아직 구글 시트 연결 설정이 안 되어 있어요.'); return; }
+  const trs = Array.from(document.querySelectorAll('#quickEntryTable tbody tr'));
+  const rows = [];
+  trs.forEach(tr=>{
+    const date = tr.querySelector('.pv-date').value;
+    const amount = parseNum(tr.querySelector('.pv-amount').value);
+    if(!date || !amount) return;
+    rows.push({
+      date, description: tr.querySelector('.pv-desc').value.trim(),
+      type: tr.querySelector('.pv-type').value, amount: Math.abs(amount),
+      category: tr.querySelector('.pv-cat').value, cardType: tr.querySelector('.pv-card').value, addedBy: getUserName()
+    });
+  });
+  if(!rows.length){ alert('저장할 내용이 없어요. 날짜와 금액을 입력해주세요.'); return; }
+  const btn = document.getElementById('quickSaveBtn');
+  const progressEl = document.getElementById('quickEntryProgress');
+  btn.disabled = true;
+  progressEl.textContent = '저장 중…';
+  try{
+    const result = await apiPost('addTransactionsBatch', { rows, who:getUserName() });
+    const now = new Date().toISOString();
+    const ids = (result && result.ids) || [];
+    rows.forEach((r,i)=>{ state.transactions.unshift({ ...r, id: ids[i]||('tmp'+Date.now()+i), createdAt: now }); });
+    state.transactions.sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''));
+    renderDashboard(); renderTransactions();
+    alert(`${rows.length}건 저장했어요.`);
+    renderQuickEntry();
+  }catch(e){ console.error(e); alert('저장에 실패했어요.'); }
+  btn.disabled = false;
+  progressEl.textContent = '';
+}
+
+/* ---------- 자동이체(정기 반복 지출) ---------- */
+function renderRecurringSection(){
+  const el = document.getElementById('recurringArea');
+  if(!el) return;
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:18px;">
+      <h3 style="margin-bottom:6px;">자동이체 등록</h3>
+      <p class="small" style="margin-top:0;">매달 같은 금액이 반복되는 지출(구독료·보험료·월세 등)을 등록해두면, 앱을 열 때마다 이번 달 것이 자동으로 채워져요.</p>
+      <div class="field-row">
+        <div class="field"><label>이름</label><input type="text" id="recurName" placeholder="예: 넷플릭스"></div>
+        <div class="field"><label>금액</label><input type="text" inputmode="numeric" id="recurAmount" placeholder="0"></div>
+        <div class="field"><label>카테고리</label><select id="recurCat">${state.categories.map(c=>`<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>카드구분</label><select id="recurCard">${cardOptionsHtml('')}</select></div>
+        <div class="field"><label>매달 결제일</label><input type="number" id="recurDay" min="1" max="31" value="25" style="width:70px;"></div>
+        <div class="field"><label>시작월</label><input type="month" id="recurStart" value="${todayYM()}"></div>
+        <button class="btn" id="recurAddBtn" type="button">등록</button>
+      </div>
+      <div id="recurringListArea" style="margin-top:14px;"></div>
+    </div>
+  `;
+  attachCommaInput(document.getElementById('recurAmount'));
+  document.getElementById('recurAddBtn').addEventListener('click', addRecurringItem);
+  renderRecurringList();
+}
+
+function renderRecurringList(){
+  const el = document.getElementById('recurringListArea');
+  if(!el) return;
+  const items = state.recurringItems || [];
+  if(!items.length){ el.innerHTML = '<div class="empty small">등록된 자동이체가 없어요.</div>'; return; }
+  el.innerHTML = `
+    <div style="overflow-x:auto;">
+    <table class="ledger-table">
+      <thead><tr><th>이름</th><th style="text-align:right;">금액</th><th>카테고리</th><th>결제일</th><th>시작월</th><th>상태</th><th></th></tr></thead>
+      <tbody>
+        ${items.map(it=>`
+          <tr data-id="${esc(it.id)}">
+            <td>${esc(it.name)}</td>
+            <td class="num" style="text-align:right;">${fmtWon(it.amount)}</td>
+            <td>${esc(it.category||'')}</td>
+            <td>매달 ${esc(it.dayOfMonth)}일</td>
+            <td>${esc(it.startDate||'')}</td>
+            <td>${it.active===false?'중지됨':'사용중'}</td>
+            <td>
+              <button class="btn ghost btn-sm recur-toggle" type="button">${it.active===false?'재개':'중지'}</button>
+              <button class="btn ghost btn-sm recur-del" type="button">삭제</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+    </div>
+  `;
+  el.querySelectorAll('.recur-toggle').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.closest('tr').dataset.id;
+      const item = (state.recurringItems||[]).find(x=>String(x.id)===id);
+      if(!item) return;
+      const newActive = item.active===false ? true : false;
+      try{
+        await apiPost('updateRecurringItem', {id, active:newActive, who:getUserName()});
+        item.active = newActive;
+        renderRecurringList();
+        if(newActive) await generateDueRecurringItems();
+      }catch(e){ console.error(e); alert('처리에 실패했어요.'); }
+    });
+  });
+  el.querySelectorAll('.recur-del').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.closest('tr').dataset.id;
+      if(!confirm('이 자동이체를 삭제할까요? (이미 생성된 거래는 그대로 남아있어요)')) return;
+      try{
+        await apiPost('deleteRecurringItem', {id, who:getUserName()});
+        state.recurringItems = (state.recurringItems||[]).filter(x=>String(x.id)!==id);
+        renderRecurringList();
+      }catch(e){ console.error(e); alert('삭제에 실패했어요.'); }
+    });
+  });
+}
+
+async function addRecurringItem(){
+  if(!state.configured){ alert('아직 구글 시트 연결 설정이 안 되어 있어요.'); return; }
+  const name = document.getElementById('recurName').value.trim();
+  const amount = Math.abs(parseNum(document.getElementById('recurAmount').value));
+  const category = document.getElementById('recurCat').value;
+  const cardType = document.getElementById('recurCard').value;
+  const dayOfMonth = Math.max(1, Math.min(31, parseInt(document.getElementById('recurDay').value,10)||1));
+  const startDate = document.getElementById('recurStart').value; // YYYY-MM
+  if(!name || !amount || !startDate){ alert('이름, 금액, 시작월을 입력해주세요.'); return; }
+  const payload = { name, amount, category, cardType, dayOfMonth, startDate, active:true, addedBy:getUserName() };
+  const btn = document.getElementById('recurAddBtn');
+  btn.disabled = true;
+  try{
+    const result = await apiPost('addRecurringItem', {...payload, who:getUserName()});
+    state.recurringItems = state.recurringItems || [];
+    state.recurringItems.push({...payload, id:(result&&result.id)||('tmp'+Date.now())});
+    document.getElementById('recurName').value='';
+    document.getElementById('recurAmount').value='';
+    renderRecurringList();
+    await generateDueRecurringItems();
+  }catch(e){ console.error(e); alert('등록에 실패했어요.'); }
+  btn.disabled = false;
+}
+
+// 등록된 자동이체 중, 시작월부터 이번 달까지 아직 안 만들어진 달치를 채워 넣는다.
+// (같은 recurringId+월 조합이 이미 있으면 건너뛰어서 중복 생성을 막음. 최대 24개월까지만 한 번에 채움)
+async function generateDueRecurringItems(){
+  if(state.generatingRecurring) return;
+  const items = (state.recurringItems||[]).filter(it=> it.active !== false);
+  if(!items.length) return;
+  const todayYMStr = todayYM();
+  const newRows = [];
+  items.forEach(item=>{
+    const existingMonths = new Set(
+      state.transactions.filter(t=> String(t.recurringId||'')===String(item.id)).map(t=> (t.date||'').slice(0,7))
+    );
+    let cursor = (item.startDate||todayYMStr).slice(0,7);
+    let count = 0;
+    while(cursor <= todayYMStr && count < 24){
+      const pastEnd = item.endDate && cursor > item.endDate.slice(0,7);
+      if(!pastEnd && !existingMonths.has(cursor)){
+        const [y,m] = cursor.split('-').map(Number);
+        const day = Math.min(Number(item.dayOfMonth)||1, new Date(y, m, 0).getDate());
+        newRows.push({
+          date: `${cursor}-${pad(day)}`, description: item.name, type:'expense',
+          amount: Number(item.amount)||0, category: item.category||'미분류', cardType: item.cardType||'',
+          recurringId: item.id, addedBy: '자동이체'
+        });
+      }
+      cursor = addMonthsClamped(cursor+'-01', 1).slice(0,7);
+      count++;
+    }
+  });
+  if(!newRows.length) return;
+  state.generatingRecurring = true;
+  try{
+    const result = await apiPost('addTransactionsBatch', { rows: newRows, who:'자동이체' });
+    const now = new Date().toISOString();
+    const ids = (result && result.ids) || [];
+    newRows.forEach((r,i)=>{ state.transactions.unshift({ ...r, id: ids[i]||('tmp'+Date.now()+i), createdAt: now }); });
+    state.transactions.sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''));
+    renderDashboard(); renderTransactions();
+  }catch(e){ console.error('자동이체 생성 실패', e); }
+  state.generatingRecurring = false;
 }
 
 /* ---------- 거래 내역 탭 ---------- */
