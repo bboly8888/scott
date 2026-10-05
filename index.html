@@ -397,7 +397,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbzuZ34L5m5zlJTYU-_9TFoK
 const API_KEY = '083100';      // Code.gs의 SECRET과 반드시 동일해야 함
 const POLL_MS = 15000; // 자동 새로고침 주기 (15초)
 const LOCK_PASSWORD = '083100'; // 앱 잠금 화면 비밀번호 (원하는 값으로 바꾸세요)
-const APP_VERSION = 'v7'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
+const APP_VERSION = 'v8'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
 /* ============================================================ */
 
 const DEFAULT_CATEGORIES = [
@@ -424,6 +424,7 @@ const state = {
   uploadContext:null,
   syncing:false,
   generatingRecurring:false,
+  formsInitialized:false,
 };
 
 /* ---------- API 통신 ---------- */
@@ -595,7 +596,16 @@ async function refreshAll(manual){
     }
     await generateDueRecurringItems();
     renderDashboard(); renderTransactions(); renderAccounts(); renderCategories(); renderTxCatFilter(); renderActivityLog(); renderSavingsLog();
-    renderQuickEntry(); renderRecurringSection();
+    // 빠른 입력 표/자동이체 등록 폼은 입력 중인 내용이 있을 수 있어서, 데이터가 처음 제대로 로드된 뒤
+    // (카테고리 목록이 채워진 뒤) 딱 한 번만 다시 그리고, 그 이후(15초마다 도는 자동 새로고침 포함)엔
+    // 자동이체 "목록"만 갱신해서 입력 중인 내용을 건드리지 않는다.
+    if(!state.formsInitialized){
+      renderQuickEntry();
+      renderRecurringSection();
+      state.formsInitialized = true;
+    }else{
+      renderRecurringList();
+    }
     const now = new Date();
     statusEl.textContent = `마지막 동기화 ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     statusEl.className = 'sync-status ok';
