@@ -259,6 +259,7 @@ select.cat-select{max-width:130px;}
     <nav id="navBar">
       <button class="nav-btn active" data-tab="dashboard"><i class="ti ti-home" aria-hidden="true"></i><span>대시보드</span></button>
       <button class="nav-btn" data-tab="upload"><i class="ti ti-upload" aria-hidden="true"></i><span>내역 업로드</span></button>
+      <button class="nav-btn" data-tab="recurring"><i class="ti ti-repeat" aria-hidden="true"></i><span>자동이체</span></button>
       <button class="nav-btn" data-tab="transactions"><i class="ti ti-list" aria-hidden="true"></i><span>거래 내역</span></button>
       <button class="nav-btn" data-tab="accounts"><i class="ti ti-pig-money" aria-hidden="true"></i><span>저축·잔고</span></button>
       <button class="nav-btn" data-tab="categories"><i class="ti ti-tags" aria-hidden="true"></i><span>카테고리 설정</span></button>
@@ -317,8 +318,6 @@ select.cat-select{max-width:130px;}
         </div>
       </div>
 
-      <div id="recurringArea"></div>
-
       <details class="card" style="margin-bottom:18px;">
         <summary style="cursor:pointer; font-weight:600;">텍스트로 붙여넣기 (고급)</summary>
         <p class="small" style="margin:10px 0 0;">카드사 앱이나 문자에서 복사한 내역을 그대로 붙여넣어도 괜찮아요. (날짜와 금액이 포함된 줄을 자동으로 찾아요) PDF·이미지에서 자동 인식이 안 됐을 때도 여기서 확인·수정할 수 있어요.</p>
@@ -328,6 +327,15 @@ select.cat-select{max-width:130px;}
 
       <div id="mappingArea"></div>
       <div id="previewArea"></div>
+    </section>
+
+    <section class="tab" id="tab-recurring">
+      <div class="page-head">
+        <h2>자동이체</h2>
+        <p>매달 반복되는 지출을 한눈에 확인하고 관리해요.</p>
+      </div>
+      <div id="recurringSummary"></div>
+      <div id="recurringArea"></div>
     </section>
 
     <section class="tab" id="tab-transactions">
@@ -397,7 +405,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbzuZ34L5m5zlJTYU-_9TFoK
 const API_KEY = '083100';      // Code.gs의 SECRET과 반드시 동일해야 함
 const POLL_MS = 15000; // 자동 새로고침 주기 (15초)
 const LOCK_PASSWORD = '083100'; // 앱 잠금 화면 비밀번호 (원하는 값으로 바꾸세요)
-const APP_VERSION = 'v8'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
+const APP_VERSION = 'v9'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
 /* ============================================================ */
 
 const DEFAULT_CATEGORIES = [
@@ -1333,58 +1341,119 @@ function renderRecurringSection(){
   renderRecurringList();
 }
 
+// 등록된 자동이체 중 오늘(또는 그 이후)로 가장 가까운 결제일을 계산한다.
+// 시작월이 아직 안 됐으면 시작월의 결제일, 이번 달 결제일이 이미 지났으면 다음 달 결제일을 돌려준다.
+// 종료월(endDate)이 지났으면 null(종료됨).
+function nextRecurringDate(item){
+  const today = new Date().toISOString().slice(0,10);
+  const day = Math.max(1, Math.min(31, Number(item.dayOfMonth)||1));
+  let ym = (item.startDate||today).slice(0,7);
+  if(ym < todayYM()) ym = todayYM();
+  for(let i=0;i<24;i++){
+    const [y,m] = ym.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    const candidate = `${ym}-${pad(Math.min(day,lastDay))}`;
+    if(item.endDate && ym > item.endDate.slice(0,7)) return null;
+    if(candidate >= today) return candidate;
+    ym = addMonthsClamped(ym+'-01', 1).slice(0,7);
+  }
+  return null;
+}
+
+function dDayLabel(dateStr){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = new Date(dateStr+'T00:00:00');
+  const diff = Math.round((target-today)/86400000);
+  return diff===0 ? '오늘' : `D-${diff}`;
+}
+
 function renderRecurringList(){
   const el = document.getElementById('recurringListArea');
-  if(!el) return;
-  const items = state.recurringItems || [];
-  if(!items.length){ el.innerHTML = '<div class="empty small">등록된 자동이체가 없어요.</div>'; return; }
-  el.innerHTML = `
-    <div style="overflow-x:auto;">
-    <table class="ledger-table">
-      <thead><tr><th>이름</th><th style="text-align:right;">금액</th><th>카테고리</th><th>결제일</th><th>시작월</th><th>상태</th><th></th></tr></thead>
-      <tbody>
-        ${items.map(it=>`
+  if(el){
+    const items = state.recurringItems || [];
+    if(!items.length){
+      el.innerHTML = '<div class="empty small">등록된 자동이체가 없어요.</div>';
+    }else{
+      el.innerHTML = `
+        <div style="overflow-x:auto;">
+        <table class="ledger-table">
+          <thead><tr><th>이름</th><th style="text-align:right;">금액</th><th>카테고리</th><th>결제일</th><th>다음 결제</th><th>상태</th><th></th></tr></thead>
+          <tbody>
+            ${items.map(it=>{
+              const next = it.active===false ? null : nextRecurringDate(it);
+              const nextCell = it.active===false ? '<span class="small">중지중</span>'
+                : next ? `${esc(next)} <span class="tag">${dDayLabel(next)}</span>`
+                : '<span class="small">종료됨</span>';
+              return `
           <tr data-id="${esc(it.id)}">
             <td>${esc(it.name)}</td>
             <td class="num" style="text-align:right;">${fmtWon(it.amount)}</td>
             <td>${esc(it.category||'')}</td>
             <td>매달 ${esc(it.dayOfMonth)}일</td>
-            <td>${esc(it.startDate||'')}</td>
+            <td>${nextCell}</td>
             <td>${it.active===false?'중지됨':'사용중'}</td>
             <td>
               <button class="btn ghost btn-sm recur-toggle" type="button">${it.active===false?'재개':'중지'}</button>
               <button class="btn ghost btn-sm recur-del" type="button">삭제</button>
             </td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
+          </tr>`;}).join('')}
+          </tbody>
+        </table>
+        </div>
+      `;
+      el.querySelectorAll('.recur-toggle').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const id = btn.closest('tr').dataset.id;
+          const item = (state.recurringItems||[]).find(x=>String(x.id)===id);
+          if(!item) return;
+          const newActive = item.active===false ? true : false;
+          try{
+            await apiPost('updateRecurringItem', {id, active:newActive, who:getUserName()});
+            item.active = newActive;
+            renderRecurringList();
+            if(newActive) await generateDueRecurringItems();
+          }catch(e){ console.error(e); alert('처리에 실패했어요.'); }
+        });
+      });
+      el.querySelectorAll('.recur-del').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const id = btn.closest('tr').dataset.id;
+          if(!confirm('이 자동이체를 삭제할까요? (이미 생성된 거래는 그대로 남아있어요)')) return;
+          try{
+            await apiPost('deleteRecurringItem', {id, who:getUserName()});
+            state.recurringItems = (state.recurringItems||[]).filter(x=>String(x.id)!==id);
+            renderRecurringList();
+          }catch(e){ console.error(e); alert('삭제에 실패했어요.'); }
+        });
+      });
+    }
+  }
+  renderRecurringSummary();
+}
+
+function renderRecurringSummary(){
+  const el = document.getElementById('recurringSummary');
+  if(!el) return;
+  const items = state.recurringItems || [];
+  const ymNow = todayYM();
+  const activeItems = items.filter(it=> it.active!==false);
+  const dueThisMonth = activeItems.filter(it=> (it.startDate||'').slice(0,7) <= ymNow && (!it.endDate || it.endDate.slice(0,7) >= ymNow));
+  const total = dueThisMonth.reduce((s,it)=> s+(Number(it.amount)||0), 0);
+  const pausedCount = items.length - activeItems.length;
+  let nearest = null;
+  activeItems.forEach(it=>{
+    const next = nextRecurringDate(it);
+    if(next && (!nearest || next < nearest.date)) nearest = {date: next, name: it.name};
+  });
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:18px;">
+      <div class="hero-label">이번 달 자동이체 합계</div>
+      <div class="hero-number num" style="color:var(--ink);">${fmtWon(total)}</div>
+      <div class="small" style="color:var(--ink-soft); margin-top:4px;">
+        사용중 ${activeItems.length}건${pausedCount?` · 중지 ${pausedCount}건`:''}${nearest ? ` · 가장 가까운 결제: ${esc(nearest.name)} (${dDayLabel(nearest.date)})` : ''}
+      </div>
     </div>
   `;
-  el.querySelectorAll('.recur-toggle').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const id = btn.closest('tr').dataset.id;
-      const item = (state.recurringItems||[]).find(x=>String(x.id)===id);
-      if(!item) return;
-      const newActive = item.active===false ? true : false;
-      try{
-        await apiPost('updateRecurringItem', {id, active:newActive, who:getUserName()});
-        item.active = newActive;
-        renderRecurringList();
-        if(newActive) await generateDueRecurringItems();
-      }catch(e){ console.error(e); alert('처리에 실패했어요.'); }
-    });
-  });
-  el.querySelectorAll('.recur-del').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const id = btn.closest('tr').dataset.id;
-      if(!confirm('이 자동이체를 삭제할까요? (이미 생성된 거래는 그대로 남아있어요)')) return;
-      try{
-        await apiPost('deleteRecurringItem', {id, who:getUserName()});
-        state.recurringItems = (state.recurringItems||[]).filter(x=>String(x.id)!==id);
-        renderRecurringList();
-      }catch(e){ console.error(e); alert('삭제에 실패했어요.'); }
-    });
-  });
 }
 
 async function addRecurringItem(){
