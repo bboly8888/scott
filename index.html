@@ -405,7 +405,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbzuZ34L5m5zlJTYU-_9TFoK
 const API_KEY = '083100';      // Code.gs의 SECRET과 반드시 동일해야 함
 const POLL_MS = 15000; // 자동 새로고침 주기 (15초)
 const LOCK_PASSWORD = '083100'; // 앱 잠금 화면 비밀번호 (원하는 값으로 바꾸세요)
-const APP_VERSION = 'v10'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
+const APP_VERSION = 'v11'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
 /* ============================================================ */
 
 const DEFAULT_CATEGORIES = [
@@ -1368,7 +1368,26 @@ function dDayLabel(dateStr){
   return diff===0 ? '오늘' : `D-${diff}`;
 }
 
+// 등록 폼의 카테고리/출금 통장 드롭다운 "옵션만" 최신 상태로 다시 채운다 (이름/금액 등 입력 중인 칸은 안 건드림).
+// 폼 전체(renderRecurringSection)는 최초 1회만 그리기 때문에, 그 이후 계좌/카테고리가 추가돼도
+// 이 함수가 매 새로고침마다(renderRecurringList와 함께) 옵션 목록을 갱신해준다.
+function refreshRecurFormOptions(){
+  const catSel = document.getElementById('recurCat');
+  if(catSel){
+    const current = catSel.value;
+    catSel.innerHTML = state.categories.map(c=>`<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
+    if(current && Array.from(catSel.options).some(o=>o.value===current)) catSel.value = current;
+  }
+  const accSel = document.getElementById('recurAccount');
+  if(accSel){
+    const current = accSel.value;
+    accSel.innerHTML = '<option value="">(선택 안 함)</option>' + (state.accounts||[]).map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+    if(current && Array.from(accSel.options).some(o=>o.value===current)) accSel.value = current;
+  }
+}
+
 function renderRecurringList(){
+  refreshRecurFormOptions();
   const el = document.getElementById('recurringListArea');
   if(el){
     const items = state.recurringItems || [];
