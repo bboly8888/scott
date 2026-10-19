@@ -405,7 +405,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbzuZ34L5m5zlJTYU-_9TFoK
 const API_KEY = '083100';      // Code.gs의 SECRET과 반드시 동일해야 함
 const POLL_MS = 15000; // 자동 새로고침 주기 (15초)
 const LOCK_PASSWORD = '083100'; // 앱 잠금 화면 비밀번호 (원하는 값으로 바꾸세요)
-const APP_VERSION = 'v9'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
+const APP_VERSION = 'v10'; // 배포가 실제로 반영됐는지 잠금 화면에서 확인하기 위한 버전 표시 (기능 배포할 때마다 수동으로 올려주세요)
 /* ============================================================ */
 
 const DEFAULT_CATEGORIES = [
@@ -1329,6 +1329,7 @@ function renderRecurringSection(){
         <div class="field"><label>금액</label><input type="text" inputmode="numeric" id="recurAmount" placeholder="0"></div>
         <div class="field"><label>카테고리</label><select id="recurCat">${state.categories.map(c=>`<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}</select></div>
         <div class="field"><label>카드구분</label><select id="recurCard">${cardOptionsHtml('')}</select></div>
+        <div class="field"><label>출금 통장</label><select id="recurAccount"><option value="">(선택 안 함)</option>${(state.accounts||[]).map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></div>
         <div class="field"><label>매달 결제일</label><input type="number" id="recurDay" min="1" max="31" value="25" style="width:70px;"></div>
         <div class="field"><label>시작월</label><input type="month" id="recurStart" value="${todayYM()}"></div>
         <button class="btn" id="recurAddBtn" type="button">등록</button>
@@ -1377,18 +1378,20 @@ function renderRecurringList(){
       el.innerHTML = `
         <div style="overflow-x:auto;">
         <table class="ledger-table">
-          <thead><tr><th>이름</th><th style="text-align:right;">금액</th><th>카테고리</th><th>결제일</th><th>다음 결제</th><th>상태</th><th></th></tr></thead>
+          <thead><tr><th>이름</th><th style="text-align:right;">금액</th><th>카테고리</th><th>출금 통장</th><th>결제일</th><th>다음 결제</th><th>상태</th><th></th></tr></thead>
           <tbody>
             ${items.map(it=>{
               const next = it.active===false ? null : nextRecurringDate(it);
               const nextCell = it.active===false ? '<span class="small">중지중</span>'
                 : next ? `${esc(next)} <span class="tag">${dDayLabel(next)}</span>`
                 : '<span class="small">종료됨</span>';
+              const account = it.accountId ? (state.accounts||[]).find(a=>String(a.id)===String(it.accountId)) : null;
               return `
           <tr data-id="${esc(it.id)}">
             <td>${esc(it.name)}</td>
             <td class="num" style="text-align:right;">${fmtWon(it.amount)}</td>
             <td>${esc(it.category||'')}</td>
+            <td>${account ? esc(account.name) : '<span class="small">-</span>'}</td>
             <td>매달 ${esc(it.dayOfMonth)}일</td>
             <td>${nextCell}</td>
             <td>${it.active===false?'중지됨':'사용중'}</td>
@@ -1462,10 +1465,11 @@ async function addRecurringItem(){
   const amount = Math.abs(parseNum(document.getElementById('recurAmount').value));
   const category = document.getElementById('recurCat').value;
   const cardType = document.getElementById('recurCard').value;
+  const accountId = document.getElementById('recurAccount').value;
   const dayOfMonth = Math.max(1, Math.min(31, parseInt(document.getElementById('recurDay').value,10)||1));
   const startDate = document.getElementById('recurStart').value; // YYYY-MM
   if(!name || !amount || !startDate){ alert('이름, 금액, 시작월을 입력해주세요.'); return; }
-  const payload = { name, amount, category, cardType, dayOfMonth, startDate, active:true, addedBy:getUserName() };
+  const payload = { name, amount, category, cardType, accountId, dayOfMonth, startDate, active:true, addedBy:getUserName() };
   const btn = document.getElementById('recurAddBtn');
   btn.disabled = true;
   try{
@@ -1488,6 +1492,7 @@ async function generateDueRecurringItems(){
   if(!items.length) return;
   const todayYMStr = todayYM();
   const newRows = [];
+  const accountDeltas = {}; // accountId -> 이번에 새로 빠져나가는 총액
   items.forEach(item=>{
     const existingMonths = new Set(
       state.transactions.filter(t=> String(t.recurringId||'')===String(item.id)).map(t=> (t.date||'').slice(0,7))
@@ -1504,6 +1509,9 @@ async function generateDueRecurringItems(){
           amount: Number(item.amount)||0, category: item.category||'미분류', cardType: item.cardType||'',
           recurringId: item.id, addedBy: '자동이체'
         });
+        if(item.accountId){
+          accountDeltas[item.accountId] = (accountDeltas[item.accountId]||0) + (Number(item.amount)||0);
+        }
       }
       cursor = addMonthsClamped(cursor+'-01', 1).slice(0,7);
       count++;
@@ -1517,7 +1525,18 @@ async function generateDueRecurringItems(){
     const ids = (result && result.ids) || [];
     newRows.forEach((r,i)=>{ state.transactions.unshift({ ...r, id: ids[i]||('tmp'+Date.now()+i), createdAt: now }); });
     state.transactions.sort((a,b)=> (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''));
-    renderDashboard(); renderTransactions();
+
+    // 연결된 통장이 있으면, 새로 생성된 만큼 그 통장 잔액에서도 차감한다 (부족해도 마이너스로 그대로 표시).
+    for(const accountId of Object.keys(accountDeltas)){
+      const account = (state.accounts||[]).find(a=> String(a.id)===String(accountId));
+      if(!account) continue;
+      const newBalance = (Number(account.balance)||0) - accountDeltas[accountId];
+      try{
+        await apiPost('updateAccount', { id: account.id, balance: newBalance, note: '자동이체 출금', who: '자동이체' });
+        account.balance = newBalance;
+      }catch(e){ console.error('통장 잔액 차감 실패', e); }
+    }
+    renderDashboard(); renderTransactions(); renderAccounts();
   }catch(e){ console.error('자동이체 생성 실패', e); }
   state.generatingRecurring = false;
 }
